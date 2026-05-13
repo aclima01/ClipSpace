@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="#111111"/>
+  <!-- Clipboard body -->
+  <rect x="148" y="152" width="216" height="252" rx="10" fill="none" stroke="#d4d4d4" stroke-width="22"/>
+  <!-- Clipboard clip -->
+  <rect x="208" y="130" width="96" height="46" rx="8" fill="#111111" stroke="#d4d4d4" stroke-width="22"/>
+  <!-- Content lines -->
+  <line x1="182" y1="238" x2="330" y2="238" stroke="#d4d4d4" stroke-width="18" stroke-linecap="round"/>
+  <line x1="182" y1="280" x2="330" y2="280" stroke="#d4d4d4" stroke-width="18" stroke-linecap="round"/>
+  <line x1="182" y1="322" x2="268" y2="322" stroke="#d4d4d4" stroke-width="18" stroke-linecap="round"/>
+  <!-- Broadcast arcs (LAN sharing) -->
+  <circle cx="336" cy="364" r="13" fill="#d4d4d4"/>
+  <path d="M308 336 a40 40 0 0 1 56 0" fill="none" stroke="#d4d4d4" stroke-width="16" stroke-linecap="round"/>
+  <path d="M284 312 a72 72 0 0 1 104 0" fill="none" stroke="#d4d4d4" stroke-width="16" stroke-linecap="round"/>
+</svg>

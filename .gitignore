@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Build output
+client/dist/
+server/dist/
+
+# TLS certificates and keys — NEVER commit private keys
+certs/
+
+# Database — contains user data
+server/clipspace.db
+server/clipspace.db-shm
+server/clipspace.db-wal
+
+# PM2 ecosystem config — contains machine-specific paths and cert locations
+# Use ecosystem.config.example.js as a template
+ecosystem.config.js
+
+# Claude Code local settings (machine-specific permissions)
+.claude/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.sw?
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local env overrides
+.env
+.env.local
+.env.*.local

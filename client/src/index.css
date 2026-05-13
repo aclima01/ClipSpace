@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: hsl(0 0% 97%);
+  --color-foreground: hsl(0 0% 10%);
+  --color-card: hsl(0 0% 94%);
+  --color-card-foreground: hsl(0 0% 10%);
+  --color-muted: hsl(0 0% 91%);
+  --color-muted-foreground: hsl(0 0% 48%);
+  --color-border: hsl(0 0% 83%);
+  --color-primary: hsl(0 0% 12%);
+  --color-primary-foreground: hsl(0 0% 96%);
+  --color-accent: hsl(0 0% 91%);
+  --color-accent-foreground: hsl(0 0% 10%);
+  --color-ring: hsl(0 0% 55%);
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 4px;
+  --radius-2xl: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-background: hsl(0 0% 7%);
+    --color-foreground: hsl(0 0% 83%);
+    --color-card: hsl(0 0% 9%);
+    --color-card-foreground: hsl(0 0% 83%);
+    --color-muted: hsl(0 0% 13%);
+    --color-muted-foreground: hsl(0 0% 42%);
+    --color-border: hsl(0 0% 18%);
+    --color-primary: hsl(0 0% 80%);
+    --color-primary-foreground: hsl(0 0% 8%);
+    --color-accent: hsl(0 0% 13%);
+    --color-accent-foreground: hsl(0 0% 83%);
+    --color-ring: hsl(0 0% 38%);
+  }
+}
+
+* {
+  border-color: var(--color-border);
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: ui-monospace, 'Cascadia Code', 'Fira Mono', Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100vh;        /* fallback for older browsers */
+  height: 100dvh;       /* dynamic: shrinks when iOS keyboard appears */
+  display: flex;
+  flex-direction: column;
+}
