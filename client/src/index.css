@@ -52,6 +52,29 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.search-highlight {
+  background-color: hsl(45 95% 58% / 0.35);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .search-highlight {
+    background-color: hsl(45 95% 58% / 0.25);
+    color: hsl(45 95% 78%);
+  }
+}
+
+@keyframes search-flash {
+  0%, 100% { opacity: 1; }
+  40%       { opacity: 0.4; }
+}
+
+.search-target-flash {
+  animation: search-flash 1.5s ease;
+}
+
 #root {
   height: 100vh;        /* fallback for older browsers */
   height: 100dvh;       /* dynamic: shrinks when iOS keyboard appears */

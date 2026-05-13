@@ -98,6 +98,33 @@ export function createMessage(
   };
 }
 
+export interface SearchResult {
+  conversations: Conversation[];
+  messages: (Message & { conversation_title: string })[];
+}
+
+export function search(query: string): SearchResult {
+  const term = `%${query}%`;
+  const conversations = db
+    .prepare(
+      "SELECT * FROM conversations WHERE lower(title) LIKE lower(?) ORDER BY updated_at DESC LIMIT 8"
+    )
+    .all(term) as Conversation[];
+
+  const messages = db
+    .prepare(`
+      SELECT m.*, c.title AS conversation_title
+      FROM messages m
+      JOIN conversations c ON m.conversation_id = c.id
+      WHERE lower(m.content) LIKE lower(?)
+      ORDER BY m.created_at DESC
+      LIMIT 20
+    `)
+    .all(term) as (Message & { conversation_title: string })[];
+
+  return { conversations, messages };
+}
+
 export function clearMessages(conversationId: string): void {
   db.prepare("DELETE FROM messages WHERE conversation_id = ?").run(conversationId);
 }

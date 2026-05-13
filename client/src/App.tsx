@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { ChatArea } from "./components/ChatArea";
+import { SearchOverlay } from "./components/SearchOverlay";
 import { TooltipProvider } from "./components/ui/tooltip";
 import type { Conversation } from "./types";
 
@@ -35,10 +36,23 @@ export default function App() {
   const [connectedCount, setConnectedCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 640);
   const [unreadIds, setUnreadIds] = useState<ReadonlySet<string>>(new Set());
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [targetMessageId, setTargetMessageId] = useState<string | null>(null);
 
-  // Ref so callbacks always see the latest activeId without re-creating
   const activeIdRef = useRef(activeId);
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
+
+  // Ctrl+K to open search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "k" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   useEffect(() => {
     fetch("/api/conversations")
@@ -153,6 +167,13 @@ export default function App() {
   return (
     <TooltipProvider>
       <div className="flex overflow-hidden bg-[var(--color-background)]" style={{ height: "100dvh" }}>
+        {searchOpen && (
+          <SearchOverlay
+            onSelectConversation={(id) => { handleSelect(id); }}
+            onSelectMessage={(convId, msgId) => { handleSelect(convId); setTargetMessageId(msgId); }}
+            onClose={() => setSearchOpen(false)}
+          />
+        )}
         <Sidebar
           open={sidebarOpen}
           conversations={conversations}
@@ -171,6 +192,9 @@ export default function App() {
           onConnectedCount={handleConnectedCount}
           onToggleSidebar={() => setSidebarOpen((v) => !v)}
           sidebarOpen={sidebarOpen}
+          targetMessageId={targetMessageId}
+          onTargetReached={() => setTargetMessageId(null)}
+          onOpenSearch={() => setSearchOpen(true)}
           onMessageConfirmed={handleMessageConfirmed}
           onConversationTouched={handleConversationTouched}
           onConversationCreated={handleConversationCreated}

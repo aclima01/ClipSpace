@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Send, PanelLeft, PanelLeftClose, Eraser, Trash2 } from "lucide-react";
+import { Send, PanelLeft, PanelLeftClose, Eraser, Trash2, Search } from "lucide-react";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
 import { ScrollArea } from "./ui/scroll-area";
@@ -21,6 +21,9 @@ interface ChatAreaProps {
   onMessagesCleared: (conversationId: string) => void;
   onConversationDeleted: (conversationId: string) => void;
   onConversationCreated: (conversation: { id: string; title: string; created_at: string; updated_at: string }) => void;
+  targetMessageId: string | null;
+  onTargetReached: () => void;
+  onOpenSearch: () => void;
 }
 
 export function ChatArea({
@@ -34,6 +37,9 @@ export function ChatArea({
   onMessagesCleared,
   onConversationDeleted,
   onConversationCreated,
+  targetMessageId,
+  onTargetReached,
+  onOpenSearch,
 }: ChatAreaProps) {
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [text, setText] = useState("");
@@ -50,9 +56,25 @@ export function ChatArea({
       .catch(console.error);
   }, [conversation?.id]);
 
+  // Scroll to bottom on new messages (skip if jumping to a specific target)
   useEffect(() => {
+    if (targetMessageId) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, targetMessageId]);
+
+  // Scroll to and flash a specific message from search
+  useEffect(() => {
+    if (!targetMessageId || messages.length === 0) return;
+    const el = document.getElementById(`msg-${targetMessageId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("search-target-flash");
+    const t = setTimeout(() => {
+      el.classList.remove("search-target-flash");
+      onTargetReached();
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [targetMessageId, messages, onTargetReached]);
 
   const handleIncoming = useCallback((msg: LocalMessage) => {
     setMessages((prev) => {
@@ -181,8 +203,18 @@ export function ChatArea({
         <span className="text-xs font-mono font-medium truncate">
           {conversation?.title ?? "—"}
         </span>
+        <div className="flex items-center gap-0.5 ml-auto shrink-0">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-6 w-6 text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
+            onClick={onOpenSearch}
+            title="Buscar (Ctrl+K)"
+          >
+            <Search size={13} />
+          </Button>
         {conversation && (
-          <div className="flex items-center gap-0.5 ml-auto shrink-0">
+          <>
             <Button
               size="icon"
               variant="ghost"
@@ -201,8 +233,9 @@ export function ChatArea({
             >
               <Trash2 size={13} />
             </Button>
-          </div>
+          </>
         )}
+        </div>
       </div>
 
       {!conversation ? (
@@ -224,6 +257,7 @@ export function ChatArea({
                 key={msg.clientId ?? msg.id}
                 message={msg}
                 isOwn={msg.device_name === deviceName}
+                isTarget={msg.id === targetMessageId}
               />
             ))}
             <div ref={bottomRef} />

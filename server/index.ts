@@ -14,6 +14,7 @@ import {
   createMessage,
   clearMessages,
   deleteConversation,
+  search,
 } from "./db";
 
 const app = express();
@@ -114,6 +115,12 @@ wss.on("connection", (ws) => {
 // REST endpoints
 app.get("/api/device", (_req, res) => {
   res.json({ hostname: os.hostname() });
+});
+
+app.get("/api/search", (req, res) => {
+  const q = (req.query.q as string ?? "").trim();
+  if (q.length < 1) return res.json({ conversations: [], messages: [] });
+  res.json(search(q));
 });
 
 app.get("/api/conversations", (_req, res) => {

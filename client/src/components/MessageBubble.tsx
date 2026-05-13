@@ -7,6 +7,7 @@ import type { LocalMessage } from "../types";
 interface MessageBubbleProps {
   message: LocalMessage;
   isOwn: boolean;
+  isTarget?: boolean;
 }
 
 function formatTime(isoString: string): string {
@@ -37,7 +38,7 @@ async function copyToClipboard(text: string): Promise<void> {
   document.body.removeChild(el);
 }
 
-export function MessageBubble({ message, isOwn }: MessageBubbleProps) {
+export function MessageBubble({ message, isOwn, isTarget = false }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -50,7 +51,7 @@ export function MessageBubble({ message, isOwn }: MessageBubbleProps) {
   const isFailed = message.status === "failed";
 
   return (
-    <div className={cn("flex flex-col mb-4", isOwn ? "items-end" : "items-start")}>
+    <div id={`msg-${message.id}`} className={cn("flex flex-col mb-4 transition-opacity", isOwn ? "items-end" : "items-start", isTarget && "ring-1 ring-[var(--color-ring)] rounded-sm")}>
       {/* Bubble */}
       <div
         className={cn(
