@@ -9,6 +9,8 @@ interface UseWebSocketOptions {
   onMessagesCleared: (conversationId: string) => void;
   onConversationDeleted: (conversationId: string) => void;
   onConversationCreated: (conversation: { id: string; title: string; created_at: string; updated_at: string }) => void;
+  onConversationRenamed: (conversationId: string, title: string) => void;
+  onMessageDeleted: (messageId: string, conversationId: string) => void;
 }
 
 export function useWebSocket({
@@ -19,6 +21,8 @@ export function useWebSocket({
   onMessagesCleared,
   onConversationDeleted,
   onConversationCreated,
+  onConversationRenamed,
+  onMessageDeleted,
 }: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -39,6 +43,10 @@ export function useWebSocket({
   useEffect(() => { onMessagesClearedRef.current = onMessagesCleared; }, [onMessagesCleared]);
   useEffect(() => { onConversationDeletedRef.current = onConversationDeleted; }, [onConversationDeleted]);
   useEffect(() => { onConversationCreatedRef.current = onConversationCreated; }, [onConversationCreated]);
+  const onConversationRenamedRef = useRef(onConversationRenamed);
+  useEffect(() => { onConversationRenamedRef.current = onConversationRenamed; }, [onConversationRenamed]);
+  const onMessageDeletedRef = useRef(onMessageDeleted);
+  useEffect(() => { onMessageDeletedRef.current = onMessageDeleted; }, [onMessageDeleted]);
 
   const subscribe = useCallback((ws: WebSocket) => {
     const id = conversationIdRef.current;
@@ -72,6 +80,10 @@ export function useWebSocket({
           onConversationDeletedRef.current(data.conversationId as string);
         } else if (data.type === "conversation_created") {
           onConversationCreatedRef.current(data.payload);
+        } else if (data.type === "conversation_renamed") {
+          onConversationRenamedRef.current(data.conversationId as string, data.title as string);
+        } else if (data.type === "message_deleted") {
+          onMessageDeletedRef.current(data.messageId as string, data.conversationId as string);
         }
       } catch {
         // ignore malformed frames

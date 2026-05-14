@@ -1,11 +1,17 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { ChatArea } from "./components/ChatArea";
+import { HomeView } from "./components/HomeView";
 import { SearchOverlay } from "./components/SearchOverlay";
 import { TooltipProvider } from "./components/ui/tooltip";
 import type { Conversation } from "./types";
 
 const STORAGE_KEY = "clipspace:deviceName";
+const WORKSPACE_KEY = "clipspace:workspaceName";
+
+function loadWorkspaceName(): string {
+  return localStorage.getItem(WORKSPACE_KEY) ?? "My ClipSpace";
+}
 
 function generateDeviceName(): string {
   const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
@@ -33,11 +39,13 @@ export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [deviceName, setDeviceName] = useState<string>(loadDeviceName);
+  const [workspaceName, setWorkspaceName] = useState<string>(loadWorkspaceName);
   const [connectedCount, setConnectedCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 640);
   const [unreadIds, setUnreadIds] = useState<ReadonlySet<string>>(new Set());
   const [searchOpen, setSearchOpen] = useState(false);
   const [targetMessageId, setTargetMessageId] = useState<string | null>(null);
+  const [homeRefresh, setHomeRefresh] = useState(0);
 
   const activeIdRef = useRef(activeId);
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
@@ -68,6 +76,11 @@ export default function App() {
     setDeviceName(name);
   };
 
+  const handleRenameWorkspace = (name: string) => {
+    localStorage.setItem(WORKSPACE_KEY, name);
+    setWorkspaceName(name);
+  };
+
   const handleNew = async () => {
     const title = generateTitle();
     const res = await fetch("/api/conversations", {
@@ -87,9 +100,7 @@ export default function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title }),
     });
-    setConversations((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, title } : c))
-    );
+    // State update handled by onConversationRenamed WS event (broadcasts to all including self)
   };
 
   const handleSelect = (id: string) => {
@@ -122,6 +133,7 @@ export default function App() {
 
   const handleConversationTouched = useCallback((conversationId: string, updatedAt: string) => {
     bringToTop(conversationId, updatedAt);
+    setHomeRefresh((n) => n + 1);
     if (conversationId !== activeIdRef.current) {
       setUnreadIds((prev) => {
         if (prev.has(conversationId)) return prev;
@@ -131,6 +143,12 @@ export default function App() {
       });
     }
   }, [bringToTop]);
+
+  const handleConversationRenamed = useCallback((conversationId: string, title: string) => {
+    setConversations((prev) =>
+      prev.map((c) => (c.id === conversationId ? { ...c, title } : c))
+    );
+  }, []);
 
   const handleConversationCreated = useCallback((conv: Conversation) => {
     setConversations((prev) => {
@@ -162,6 +180,7 @@ export default function App() {
     });
   }, []);
 
+  const noop = useCallback(() => {}, []);
   const activeConv = conversations.find((c) => c.id === activeId) ?? null;
 
   return (
@@ -184,8 +203,20 @@ export default function App() {
           connectedCount={connectedCount}
           deviceName={deviceName}
           onRenameDevice={handleRenameDevice}
+          workspaceName={workspaceName}
+          onRenameWorkspace={handleRenameWorkspace}
           unreadIds={unreadIds}
+          onGoHome={() => setActiveId(null)}
         />
+        {activeId === null ? (
+          <HomeView
+            refreshTrigger={homeRefresh}
+            onNavigate={(convId, msgId) => {
+              handleSelect(convId);
+              setTargetMessageId(msgId);
+            }}
+          />
+        ) : (
         <ChatArea
           conversation={activeConv}
           deviceName={deviceName}
@@ -198,9 +229,12 @@ export default function App() {
           onMessageConfirmed={handleMessageConfirmed}
           onConversationTouched={handleConversationTouched}
           onConversationCreated={handleConversationCreated}
+          onConversationRenamed={handleConversationRenamed}
+          onMessageDeleted={noop}
           onMessagesCleared={handleMessagesCleared}
           onConversationDeleted={handleConversationDeleted}
         />
+        )}
       </div>
     </TooltipProvider>
   );

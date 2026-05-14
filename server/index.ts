@@ -14,7 +14,9 @@ import {
   createMessage,
   clearMessages,
   deleteConversation,
+  deleteMessage,
   search,
+  getHomeData,
 } from "./db";
 
 const app = express();
@@ -117,6 +119,11 @@ app.get("/api/device", (_req, res) => {
   res.json({ hostname: os.hostname() });
 });
 
+app.get("/api/home", (_req, res) => {
+  const data = getHomeData();
+  res.json({ ...data, connectedNodes: totalConnected });
+});
+
 app.get("/api/search", (req, res) => {
   const q = (req.query.q as string ?? "").trim();
   if (q.length < 1) return res.json({ conversations: [], messages: [] });
@@ -140,6 +147,8 @@ app.patch("/api/conversations/:id", (req, res) => {
   const { title } = req.body;
   if (!title) return res.status(400).json({ error: "title required" });
   updateConversationTitle(req.params.id, title);
+  const msg = JSON.stringify({ type: "conversation_renamed", conversationId: req.params.id, title });
+  wss.clients.forEach((c) => { if (c.readyState === WebSocket.OPEN) c.send(msg); });
   res.json({ ok: true });
 });
 
@@ -154,6 +163,17 @@ app.post("/api/conversations/:id/messages", (req, res) => {
   const message = createMessage(req.params.id, content, deviceName);
   broadcastToConversation(req.params.id, { type: "message", payload: message });
   res.status(201).json(message);
+});
+
+app.delete("/api/messages/:id", (req, res) => {
+  const conversationId = deleteMessage(req.params.id);
+  if (!conversationId) return res.status(404).json({ error: "not found" });
+  broadcastToConversation(conversationId, {
+    type: "message_deleted",
+    messageId: req.params.id,
+    conversationId,
+  });
+  res.json({ ok: true });
 });
 
 app.delete("/api/conversations/:id/messages", (req, res) => {

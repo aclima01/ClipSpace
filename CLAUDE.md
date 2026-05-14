@@ -90,7 +90,7 @@ O servidor faz broadcast de `connected_count` para **todos** os clientes conecta
 - O `tsconfig.app.json` do cliente precisa de `"ignoreDeprecations": "6.0"` para silenciar o aviso de `baseUrl` deprecated no TypeScript 6
 - Em produção o servidor serve o static do cliente — **não** inicie o Vite dev server junto com PM2
 - O banco `clipspace.db` fica em `server/clipspace.db`. Para backup, basta copiar o arquivo (WAL mode ativado)
-- Sidebar colapsa automaticamente em telas < 640px ao selecionar uma conversa
+- Sidebar colapsa automaticamente em telas < 640px ao selecionar uma nota
 
 ---
 

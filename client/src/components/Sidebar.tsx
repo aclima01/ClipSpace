@@ -29,7 +29,10 @@ interface SidebarProps {
   connectedCount: number;
   deviceName: string;
   onRenameDevice: (name: string) => void;
+  workspaceName: string;
+  onRenameWorkspace: (name: string) => void;
   unreadIds: ReadonlySet<string>;
+  onGoHome: () => void;
 }
 
 export function Sidebar({
@@ -43,11 +46,16 @@ export function Sidebar({
   unreadIds,
   deviceName,
   onRenameDevice,
+  workspaceName,
+  onRenameWorkspace,
+  onGoHome,
 }: SidebarProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
   const [editingDevice, setEditingDevice] = useState(false);
   const [deviceValue, setDeviceValue] = useState("");
+  const [editingWorkspace, setEditingWorkspace] = useState(false);
+  const [workspaceValue, setWorkspaceValue] = useState("");
 
   const startEdit = (conv: Conversation) => {
     setEditingId(conv.id);
@@ -69,6 +77,16 @@ export function Sidebar({
     setEditingDevice(false);
   };
 
+  const startWorkspaceEdit = () => {
+    setWorkspaceValue(workspaceName);
+    setEditingWorkspace(true);
+  };
+
+  const commitWorkspaceEdit = () => {
+    if (workspaceValue.trim()) onRenameWorkspace(workspaceValue.trim());
+    setEditingWorkspace(false);
+  };
+
   return (
     <div
       className="flex flex-col border-r border-[var(--color-border)] bg-[var(--color-card)] overflow-hidden transition-all duration-200 ease-in-out shrink-0"
@@ -81,9 +99,28 @@ export function Sidebar({
           className="flex items-center justify-between px-3 pb-2.5 border-b border-[var(--color-border)]"
           style={{ paddingTop: "max(0.625rem, env(safe-area-inset-top))" }}
         >
-          <span className="text-xs font-mono font-semibold tracking-widest uppercase text-[var(--color-muted-foreground)] whitespace-nowrap">
-            ACL Notes
-          </span>
+          {editingWorkspace ? (
+            <input
+              autoFocus
+              value={workspaceValue}
+              onChange={(e) => setWorkspaceValue(e.target.value)}
+              onBlur={commitWorkspaceEdit}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitWorkspaceEdit();
+                if (e.key === "Escape") setEditingWorkspace(false);
+              }}
+              className="flex-1 min-w-0 bg-transparent text-xs font-mono font-semibold tracking-widest uppercase text-[var(--color-muted-foreground)] outline-none border-b border-[var(--color-border)] pb-px"
+            />
+          ) : (
+            <button
+              className="flex-1 min-w-0 text-left text-xs font-mono font-semibold tracking-widest uppercase text-[var(--color-muted-foreground)] truncate hover:text-[var(--color-foreground)] transition-colors"
+              onClick={onGoHome}
+              onDoubleClick={startWorkspaceEdit}
+              title="Home · duplo clique para renomear"
+            >
+              {workspaceName}
+            </button>
+          )}
           <Button
             size="icon"
             variant="ghost"

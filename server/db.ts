@@ -98,6 +98,43 @@ export function createMessage(
   };
 }
 
+export interface HomeData {
+  stats: {
+    messagesToday: number;
+    totalMessages: number;
+    totalConversations: number;
+  };
+  feed: (Message & { conversation_title: string })[];
+}
+
+export function getHomeData(): HomeData {
+  const messagesToday = (
+    db.prepare("SELECT COUNT(*) as n FROM messages WHERE date(created_at) = date('now')").get() as { n: number }
+  ).n;
+  const totalMessages = (
+    db.prepare("SELECT COUNT(*) as n FROM messages").get() as { n: number }
+  ).n;
+  const totalConversations = (
+    db.prepare("SELECT COUNT(*) as n FROM conversations").get() as { n: number }
+  ).n;
+  const feed = db.prepare(`
+    SELECT m.*, c.title AS conversation_title
+    FROM messages m
+    JOIN conversations c ON m.conversation_id = c.id
+    ORDER BY m.created_at DESC
+    LIMIT 40
+  `).all() as (Message & { conversation_title: string })[];
+
+  return { stats: { messagesToday, totalMessages, totalConversations }, feed };
+}
+
+export function deleteMessage(id: string): string | null {
+  const row = db.prepare("SELECT conversation_id FROM messages WHERE id = ?").get(id) as { conversation_id: string } | undefined;
+  if (!row) return null;
+  db.prepare("DELETE FROM messages WHERE id = ?").run(id);
+  return row.conversation_id;
+}
+
 export interface SearchResult {
   conversations: Conversation[];
   messages: (Message & { conversation_title: string })[];

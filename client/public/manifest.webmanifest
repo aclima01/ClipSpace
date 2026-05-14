@@ -1,6 +1,6 @@
 {
-  "name": "ACL Notes",
-  "short_name": "ACL",
+  "name": "My ClipSpace",
+  "short_name": "ClipSpace",
   "description": "Clipboard compartilhado para rede local",
   "start_url": "/",
   "display": "standalone",
