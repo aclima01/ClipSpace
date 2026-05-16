@@ -17,6 +17,8 @@ module.exports = {
         // Remove TLS_CERT / TLS_KEY to run without HTTPS (plain HTTP on LAN)
         TLS_CERT: "/absolute/path/to/certs/localhost+2.pem",
         TLS_KEY: "/absolute/path/to/certs/localhost+2-key.pem",
+        // Required for the AI panel feature
+        ANTHROPIC_API_KEY: "sk-ant-...",
       },
     },
     {

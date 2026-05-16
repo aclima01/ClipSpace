@@ -1,6 +1,6 @@
 {
-  "name": "My ClipSpace",
-  "short_name": "ClipSpace",
+  "name": "Anotações",
+  "short_name": "Anotações",
   "description": "Clipboard compartilhado para rede local",
   "start_url": "/",
   "display": "standalone",

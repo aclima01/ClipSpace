@@ -4,14 +4,9 @@ import { ChatArea } from "./components/ChatArea";
 import { HomeView } from "./components/HomeView";
 import { SearchOverlay } from "./components/SearchOverlay";
 import { TooltipProvider } from "./components/ui/tooltip";
-import type { Conversation } from "./types";
+import type { NotebookWithPages, Page } from "./types";
 
 const STORAGE_KEY = "clipspace:deviceName";
-const WORKSPACE_KEY = "clipspace:workspaceName";
-
-function loadWorkspaceName(): string {
-  return localStorage.getItem(WORKSPACE_KEY) ?? "My ClipSpace";
-}
 
 function generateDeviceName(): string {
   const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
@@ -26,20 +21,18 @@ function loadDeviceName(): string {
   return name;
 }
 
-function generateTitle(): string {
-  const now = new Date();
-  const dd = String(now.getDate()).padStart(2, "0");
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const hh = String(now.getHours()).padStart(2, "0");
-  const min = String(now.getMinutes()).padStart(2, "0");
-  return `Notes ${dd}/${mm} ${hh}:${min}`;
+function generatePageTitle(notebook: NotebookWithPages): string {
+  const prefix = notebook.title.replace(/[^a-z0-9]/gi, "").slice(0, 3).toLowerCase().padEnd(3, "x");
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const pattern = `${prefix}-${today}-`;
+  const count = notebook.pages.filter((p) => p.title.startsWith(pattern)).length;
+  return `${pattern}${String(count + 1).padStart(3, "0")}`;
 }
 
 export default function App() {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [notebooks, setNotebooks] = useState<NotebookWithPages[]>([]);
+  const [activePageId, setActivePageId] = useState<string | null>(null);
   const [deviceName, setDeviceName] = useState<string>(loadDeviceName);
-  const [workspaceName, setWorkspaceName] = useState<string>(loadWorkspaceName);
   const [connectedCount, setConnectedCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 640);
   const [unreadIds, setUnreadIds] = useState<ReadonlySet<string>>(new Set());
@@ -47,8 +40,8 @@ export default function App() {
   const [targetMessageId, setTargetMessageId] = useState<string | null>(null);
   const [homeRefresh, setHomeRefresh] = useState(0);
 
-  const activeIdRef = useRef(activeId);
-  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
+  const activePageIdRef = useRef(activePageId);
+  useEffect(() => { activePageIdRef.current = activePageId; }, [activePageId]);
 
   // Ctrl+K to open search
   useEffect(() => {
@@ -62,49 +55,76 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // Initial load
   useEffect(() => {
-    fetch("/api/conversations")
+    fetch("/api/notebooks")
       .then((r) => r.json())
-      .then((data: Conversation[]) => {
-        setConversations(data);
-        if (data.length > 0) setActiveId(data[0].id);
-      });
+      .then((data: NotebookWithPages[]) => setNotebooks(data));
   }, []);
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  const findPage = useCallback(
+    (pageId: string): Page | null => {
+      for (const nb of notebooks) {
+        const page = nb.pages.find((p) => p.id === pageId);
+        if (page) return page;
+      }
+      return null;
+    },
+    [notebooks]
+  );
+
+  // ── Device ─────────────────────────────────────────────────────────────────
 
   const handleRenameDevice = (name: string) => {
     localStorage.setItem(STORAGE_KEY, name);
     setDeviceName(name);
   };
 
-  const handleRenameWorkspace = (name: string) => {
-    localStorage.setItem(WORKSPACE_KEY, name);
-    setWorkspaceName(name);
-  };
+  // ── Notebook actions ───────────────────────────────────────────────────────
 
-  const handleNew = async () => {
-    const title = generateTitle();
-    const res = await fetch("/api/conversations", {
+  const handleNewNotebook = async (title: string) => {
+    await fetch("/api/notebooks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title }),
     });
-    const conv: Conversation = await res.json();
-    // Don't add to state here — the WS broadcast (conversation_created) does it
-    // for all clients including this one. Just activate the new conversation.
-    setActiveId(conv.id);
+    // State update via WS notebook_created
   };
 
-  const handleRename = async (id: string, title: string) => {
-    await fetch(`/api/conversations/${id}`, {
+  const handleRenameNotebook = async (id: string, title: string) => {
+    await fetch(`/api/notebooks/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title }),
     });
-    // State update handled by onConversationRenamed WS event (broadcasts to all including self)
   };
 
-  const handleSelect = (id: string) => {
-    setActiveId(id);
+  // ── Page actions ───────────────────────────────────────────────────────────
+
+  const handleNewPage = async (notebookId: string) => {
+    const notebook = notebooks.find((nb) => nb.id === notebookId);
+    const title = notebook ? generatePageTitle(notebook) : new Date().toISOString().slice(0, 10);
+    const res = await fetch(`/api/notebooks/${notebookId}/pages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    const page: Page = await res.json();
+    setActivePageId(page.id);
+  };
+
+  const handleRenamePage = async (id: string, title: string) => {
+    await fetch(`/api/pages/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+  };
+
+  const handleSelectPage = (id: string) => {
+    setActivePageId(id);
     setUnreadIds((prev) => {
       if (!prev.has(id)) return prev;
       const next = new Set(prev);
@@ -114,126 +134,208 @@ export default function App() {
     if (window.innerWidth < 640) setSidebarOpen(false);
   };
 
+  // ── WS event handlers (passed to ChatArea) ─────────────────────────────────
+
   const handleConnectedCount = useCallback((count: number) => {
     setConnectedCount(count);
   }, []);
 
-  const bringToTop = useCallback((conversationId: string, updatedAt: string) => {
-    setConversations((prev) => {
-      const idx = prev.findIndex((c) => c.id === conversationId);
-      if (idx <= 0) return prev;
-      const updated = { ...prev[idx], updated_at: updatedAt };
-      return [updated, ...prev.slice(0, idx), ...prev.slice(idx + 1)];
-    });
-  }, []);
-
-  const handleMessageConfirmed = useCallback((conversationId: string) => {
-    bringToTop(conversationId, new Date().toISOString());
-  }, [bringToTop]);
-
-  const handleConversationTouched = useCallback((conversationId: string, updatedAt: string) => {
-    bringToTop(conversationId, updatedAt);
-    setHomeRefresh((n) => n + 1);
-    if (conversationId !== activeIdRef.current) {
-      setUnreadIds((prev) => {
-        if (prev.has(conversationId)) return prev;
-        const next = new Set(prev);
-        next.add(conversationId);
-        return next;
-      });
-    }
-  }, [bringToTop]);
-
-  const handleConversationRenamed = useCallback((conversationId: string, title: string) => {
-    setConversations((prev) =>
-      prev.map((c) => (c.id === conversationId ? { ...c, title } : c))
+  const bringPageToTop = useCallback((pageId: string, notebookId: string, updatedAt: string) => {
+    setNotebooks((prev) =>
+      prev.map((nb) => {
+        if (nb.id !== notebookId) return nb;
+        const idx = nb.pages.findIndex((p) => p.id === pageId);
+        if (idx <= 0) return { ...nb, updated_at: updatedAt };
+        const updated = { ...nb.pages[idx], updated_at: updatedAt };
+        return {
+          ...nb,
+          updated_at: updatedAt,
+          pages: [updated, ...nb.pages.slice(0, idx), ...nb.pages.slice(idx + 1)],
+        };
+      }).sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     );
   }, []);
 
-  const handleConversationCreated = useCallback((conv: Conversation) => {
-    setConversations((prev) => {
-      if (prev.some((c) => c.id === conv.id)) return prev;
-      return [conv, ...prev];
-    });
-  }, []);
-
-  const handleMessagesCleared = useCallback((conversationId: string) => {
-    // ChatArea listens to this via WS and will clear its own message list;
-    // nothing to update in App state
-    void conversationId;
-  }, []);
-
-  const handleConversationDeleted = useCallback((conversationId: string) => {
-    setConversations((prev) => {
-      const remaining = prev.filter((c) => c.id !== conversationId);
-      // If the deleted conversation was active, move to the next one
-      if (activeIdRef.current === conversationId) {
-        setActiveId(remaining.length > 0 ? remaining[0].id : null);
+  const handlePageTouched = useCallback(
+    (pageId: string, notebookId: string, updatedAt: string) => {
+      bringPageToTop(pageId, notebookId, updatedAt);
+      setHomeRefresh((n) => n + 1);
+      if (pageId !== activePageIdRef.current) {
+        setUnreadIds((prev) => {
+          if (prev.has(pageId)) return prev;
+          const next = new Set(prev);
+          next.add(pageId);
+          return next;
+        });
       }
-      return remaining;
-    });
-    setUnreadIds((prev) => {
-      if (!prev.has(conversationId)) return prev;
-      const next = new Set(prev);
-      next.delete(conversationId);
-      return next;
+    },
+    [bringPageToTop]
+  );
+
+  const handleMessageConfirmed = useCallback(
+    (pageId: string, notebookId: string) => {
+      bringPageToTop(pageId, notebookId, new Date().toISOString());
+    },
+    [bringPageToTop]
+  );
+
+  const handlePageRenamed = useCallback((pageId: string, _notebookId: string, title: string) => {
+    setNotebooks((prev) =>
+      prev.map((nb) => ({
+        ...nb,
+        pages: nb.pages.map((p) => (p.id === pageId ? { ...p, title } : p)),
+      }))
+    );
+  }, []);
+
+  const handleNotebookRenamed = useCallback((notebookId: string, title: string) => {
+    setNotebooks((prev) =>
+      prev.map((nb) => (nb.id === notebookId ? { ...nb, title } : nb))
+    );
+  }, []);
+
+  const handlePageCreated = useCallback((page: Page) => {
+    setNotebooks((prev) =>
+      prev.map((nb) => {
+        if (nb.id !== page.notebook_id) return nb;
+        if (nb.pages.some((p) => p.id === page.id)) return nb;
+        return { ...nb, pages: [page, ...nb.pages] };
+      })
+    );
+  }, []);
+
+  const handleNotebookCreated = useCallback(
+    (notebook: { id: string; title: string; created_at: string; updated_at: string }) => {
+      setNotebooks((prev) => {
+        if (prev.some((nb) => nb.id === notebook.id)) return prev;
+        return [{ ...notebook, pages: [] }, ...prev];
+      });
+    },
+    []
+  );
+
+  const handleMessagesCleared = useCallback((_pageId: string) => {}, []);
+
+  const handlePageDeleted = useCallback(
+    (pageId: string, _notebookId: string) => {
+      setNotebooks((prev) =>
+        prev.map((nb) => ({ ...nb, pages: nb.pages.filter((p) => p.id !== pageId) }))
+      );
+      if (activePageIdRef.current === pageId) setActivePageId(null);
+      setUnreadIds((prev) => {
+        if (!prev.has(pageId)) return prev;
+        const next = new Set(prev);
+        next.delete(pageId);
+        return next;
+      });
+    },
+    []
+  );
+
+  const handleNotebookDeleted = useCallback((notebookId: string) => {
+    setNotebooks((prev) => {
+      const nb = prev.find((n) => n.id === notebookId);
+      if (nb?.pages.some((p) => p.id === activePageIdRef.current)) {
+        setActivePageId(null);
+      }
+      return prev.filter((n) => n.id !== notebookId);
     });
   }, []);
+
+  const handleCreatePageFromSummary = useCallback(async (content: string) => {
+    if (!activePageId) return;
+    const currentPage = findPage(activePageId);
+    if (!currentPage) return;
+    const notebook = notebooks.find((nb) => nb.id === currentPage.notebook_id);
+    if (!notebook) return;
+    const title = generatePageTitle(notebook);
+    const res = await fetch(`/api/notebooks/${notebook.id}/pages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    const newPage: Page = await res.json();
+    await fetch(`/api/pages/${newPage.id}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, deviceName: "AI ✦" }),
+    });
+    setActivePageId(newPage.id);
+  }, [activePageId, findPage, notebooks]);
+
+  const handleNavigateToTask = useCallback(async (taskId: string) => {
+    const res = await fetch(`/api/tasks/${taskId}`);
+    if (!res.ok) return;
+    const { pageId, messageId } = await res.json() as { pageId: string; messageId: string };
+    handleSelectPage(pageId);
+    setTargetMessageId(messageId);
+  }, [handleSelectPage]);
 
   const noop = useCallback(() => {}, []);
-  const activeConv = conversations.find((c) => c.id === activeId) ?? null;
+
+  const activePage = activePageId ? findPage(activePageId) : null;
 
   return (
     <TooltipProvider>
       <div className="flex overflow-hidden bg-[var(--color-background)]" style={{ height: "100dvh" }}>
         {searchOpen && (
           <SearchOverlay
-            onSelectConversation={(id) => { handleSelect(id); }}
-            onSelectMessage={(convId, msgId) => { handleSelect(convId); setTargetMessageId(msgId); }}
+            onSelectPage={(pageId) => handleSelectPage(pageId)}
+            onSelectMessage={(pageId, msgId) => {
+              handleSelectPage(pageId);
+              setTargetMessageId(msgId);
+            }}
             onClose={() => setSearchOpen(false)}
           />
         )}
         <Sidebar
           open={sidebarOpen}
-          conversations={conversations}
-          activeId={activeId}
-          onSelect={handleSelect}
-          onNew={handleNew}
-          onRename={handleRename}
+          notebooks={notebooks}
+          activePageId={activePageId}
+          onSelectPage={handleSelectPage}
+          onNewNotebook={handleNewNotebook}
+          onNewPage={handleNewPage}
+          onRenameNotebook={handleRenameNotebook}
+          onRenamePage={handleRenamePage}
           connectedCount={connectedCount}
           deviceName={deviceName}
           onRenameDevice={handleRenameDevice}
-          workspaceName={workspaceName}
-          onRenameWorkspace={handleRenameWorkspace}
           unreadIds={unreadIds}
-          onGoHome={() => setActiveId(null)}
+          onGoHome={() => setActivePageId(null)}
         />
-        {activeId === null ? (
+        {activePageId === null ? (
           <HomeView
             refreshTrigger={homeRefresh}
-            onNavigate={(convId, msgId) => {
-              handleSelect(convId);
+            onNavigate={(pageId, msgId) => {
+              handleSelectPage(pageId);
               setTargetMessageId(msgId);
             }}
+            onToggleSidebar={() => setSidebarOpen((v) => !v)}
+            sidebarOpen={sidebarOpen}
           />
         ) : (
-        <ChatArea
-          conversation={activeConv}
-          deviceName={deviceName}
-          onConnectedCount={handleConnectedCount}
-          onToggleSidebar={() => setSidebarOpen((v) => !v)}
-          sidebarOpen={sidebarOpen}
-          targetMessageId={targetMessageId}
-          onTargetReached={() => setTargetMessageId(null)}
-          onOpenSearch={() => setSearchOpen(true)}
-          onMessageConfirmed={handleMessageConfirmed}
-          onConversationTouched={handleConversationTouched}
-          onConversationCreated={handleConversationCreated}
-          onConversationRenamed={handleConversationRenamed}
-          onMessageDeleted={noop}
-          onMessagesCleared={handleMessagesCleared}
-          onConversationDeleted={handleConversationDeleted}
-        />
+          <ChatArea
+            page={activePage}
+            deviceName={deviceName}
+            onConnectedCount={handleConnectedCount}
+            onToggleSidebar={() => setSidebarOpen((v) => !v)}
+            sidebarOpen={sidebarOpen}
+            targetMessageId={targetMessageId}
+            onTargetReached={() => setTargetMessageId(null)}
+            onOpenSearch={() => setSearchOpen(true)}
+            onMessageConfirmed={handleMessageConfirmed}
+            onPageTouched={handlePageTouched}
+            onPageCreated={handlePageCreated}
+            onNotebookCreated={handleNotebookCreated}
+            onPageRenamed={handlePageRenamed}
+            onNotebookRenamed={handleNotebookRenamed}
+            onMessageDeleted={noop}
+            onMessagesCleared={handleMessagesCleared}
+            onPageDeleted={handlePageDeleted}
+            onNotebookDeleted={handleNotebookDeleted}
+            onCreatePageFromSummary={handleCreatePageFromSummary}
+            onNavigateToTask={handleNavigateToTask}
+          />
         )}
       </div>
     </TooltipProvider>
