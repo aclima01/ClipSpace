@@ -130,6 +130,10 @@ app.get("/api/tasks/:taskId", (req, res) => {
 
 // ── REST: misc ─────────────────────────────────────────────────────────────────
 
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
 app.get("/api/device", (_req, res) => {
   res.json({ hostname: os.hostname() });
 });

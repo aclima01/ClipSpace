@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Send, PanelLeft, PanelLeftClose, Eraser, Trash2, Search, Sparkles, Pin, ChevronDown } from "lucide-react";
+import { Send, PanelLeft, PanelLeftClose, Eraser, Trash2, Search, Sparkles, Pin, ChevronDown, FileText } from "lucide-react";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
 import { ScrollArea } from "./ui/scroll-area";
@@ -7,9 +7,31 @@ import { MessageBubble } from "./MessageBubble";
 import { AiPanel } from "./AiPanel";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { randomUUID, cn } from "@/lib/utils";
+import { saveCache, loadCache, enqueueMessage } from "@/lib/offlineCache";
 import type { Page, LocalMessage } from "../types";
 
 const CONFIRM_TIMEOUT_MS = 5000;
+
+function ServerStatusBadge({ serverOnline, syncing }: { serverOnline: boolean; syncing: boolean }) {
+  if (syncing) return (
+    <span className="shrink-0 flex items-center gap-1 font-mono text-[11px] text-amber-500/80">
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+      sincronizando
+    </span>
+  );
+  if (serverOnline) return (
+    <span className="shrink-0 flex items-center gap-1 font-mono text-[11px] text-green-500/70">
+      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+      online
+    </span>
+  );
+  return (
+    <span className="shrink-0 flex items-center gap-1 font-mono text-[11px] text-red-500/70">
+      <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+      offline
+    </span>
+  );
+}
 
 interface ChatAreaProps {
   page: Page | null;
@@ -32,6 +54,10 @@ interface ChatAreaProps {
   onMessageDeleted: (messageId: string) => void;
   onCreatePageFromSummary: (content: string) => Promise<void>;
   onNavigateToTask: (taskId: string) => void;
+  homeStats: { messagesToday: number; openTodos: number; totalPages: number; totalNotebooks: number } | null;
+  serverOnline: boolean;
+  syncing: boolean;
+  refreshTrigger: number;
 }
 
 export function ChatArea({
@@ -55,6 +81,10 @@ export function ChatArea({
   onMessageDeleted,
   onCreatePageFromSummary,
   onNavigateToTask,
+  homeStats,
+  serverOnline,
+  syncing,
+  refreshTrigger,
 }: ChatAreaProps) {
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [text, setText] = useState("");
@@ -116,11 +146,16 @@ export function ChatArea({
     if (!page) { setMessages([]); return; }
     fetch(`/api/pages/${page.id}/messages`)
       .then((r) => r.json())
-      .then((msgs: LocalMessage[]) =>
-        setMessages(msgs.map((m) => ({ ...m, status: "confirmed" as const })))
-      )
-      .catch(console.error);
-  }, [page?.id]);
+      .then(async (msgs: LocalMessage[]) => {
+        const confirmed = msgs.map((m) => ({ ...m, status: "confirmed" as const }));
+        setMessages(confirmed);
+        await saveCache(`messages:${page.id}`, msgs);
+      })
+      .catch(async () => {
+        const cached = await loadCache<LocalMessage[]>(`messages:${page.id}`);
+        if (cached) setMessages(cached.map((m) => ({ ...m, status: "confirmed" as const })));
+      });
+  }, [page?.id, refreshTrigger]);
 
   useEffect(() => {
     if (targetMessageId) return;
@@ -251,9 +286,14 @@ export function ChatArea({
     const sent = sendMessage(content, deviceName, clientId);
 
     if (!sent) {
-      setMessages((prev) =>
-        prev.map((m) => (m.clientId === clientId ? { ...m, status: "failed" } : m))
-      );
+      if (!serverOnline) {
+        enqueueMessage({ id: clientId, pageId: page.id, content, deviceName, createdAt: new Date().toISOString() });
+        // stays "pending" until sync
+      } else {
+        setMessages((prev) =>
+          prev.map((m) => (m.clientId === clientId ? { ...m, status: "failed" } : m))
+        );
+      }
       return;
     }
 
@@ -283,15 +323,10 @@ export function ChatArea({
           className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 pb-2 shrink-0"
           style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
         >
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={onToggleSidebar}
-            title={sidebarOpen ? "Fechar menu" : "Abrir menu"}
-            className="h-6 w-6 shrink-0"
-          >
+          <Button size="icon" variant="ghost" onClick={onToggleSidebar} title={sidebarOpen ? "Fechar menu" : "Abrir menu"} className="h-6 w-6 shrink-0">
             {sidebarOpen ? <PanelLeftClose size={14} /> : <PanelLeft size={14} />}
           </Button>
+          <FileText size={13} className="shrink-0 text-[var(--color-muted-foreground)]" />
           {editingTitle ? (
             <input
               ref={titleInputRef}
@@ -302,57 +337,49 @@ export function ChatArea({
                 if (e.key === "Enter") commitTitleEdit();
                 if (e.key === "Escape") setEditingTitle(false);
               }}
-              className="flex-1 min-w-0 bg-transparent text-xs font-mono font-medium text-[var(--color-foreground)] outline-none border-b border-[var(--color-border)] pb-px"
+              className="shrink-0 max-w-[180px] bg-transparent text-[13px] font-medium text-[var(--color-foreground)] outline-none border-b border-[var(--color-border)] pb-px"
             />
           ) : (
             <button
-              className="flex-1 min-w-0 text-left text-[13px] font-medium truncate hover:opacity-70 transition-opacity"
+              className="shrink-0 max-w-[180px] text-left text-[13px] font-medium truncate hover:opacity-70 transition-opacity"
               onClick={startTitleEdit}
               title="Clique para renomear"
             >
               {page?.title ?? "—"}
             </button>
           )}
-          <div className="flex items-center gap-0.5 ml-auto shrink-0">
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-6 w-6 text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
-              onClick={onOpenSearch}
-              title="Buscar (Ctrl+K)"
-            >
+          {/* Statusline */}
+          <div className="flex items-center flex-1 min-w-0 overflow-hidden ml-1 gap-0 font-mono text-[11px] text-[var(--color-muted-foreground)]">
+            {homeStats ? (
+              <>
+                <span className="shrink-0">{homeStats.messagesToday} notes hoje</span>
+                <span className="mx-2 opacity-30 shrink-0">·</span>
+                <span className={cn("shrink-0", homeStats.openTodos > 0 ? "text-amber-500/80" : "")}>{homeStats.openTodos} to-dos</span>
+                <span className="mx-2 opacity-30 shrink-0">·</span>
+                <span className="shrink-0">{homeStats.totalPages} pages</span>
+                <span className="mx-2 opacity-30 shrink-0">·</span>
+                <span className="shrink-0">{homeStats.totalNotebooks} notebooks</span>
+              </>
+            ) : (
+              <span className="opacity-30">—</span>
+            )}
+          </div>
+          {/* Server status indicator */}
+          <ServerStatusBadge serverOnline={serverOnline} syncing={syncing} />
+          {/* Actions */}
+          <div className="flex items-center gap-0.5 shrink-0">
+            <Button size="icon" variant="ghost" className="h-6 w-6 text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]" onClick={onOpenSearch} title="Buscar (Ctrl+K)">
               <Search size={13} />
             </Button>
             {page && (
               <>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-6 w-6 text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
-                  onClick={handleClearMessages}
-                  title="Limpar notas"
-                >
+                <Button size="icon" variant="ghost" className="h-6 w-6 text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]" onClick={handleClearMessages} title="Limpar notas">
                   <Eraser size={13} />
                 </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="h-6 w-6 text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
-                  onClick={handleDeletePage}
-                  title="Excluir page"
-                >
+                <Button size="icon" variant="ghost" className="h-6 w-6 text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]" onClick={handleDeletePage} title="Excluir page">
                   <Trash2 size={13} />
                 </Button>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className={cn(
-                    "h-6 w-6 transition-colors",
-                    aiOpen ? "bg-[var(--color-muted)]" : "hover:bg-[var(--color-muted)]"
-                  )}
-                  onClick={() => setAiOpen((v) => !v)}
-                  title="Painel AI"
-                >
+                <Button size="icon" variant="ghost" className={cn("h-6 w-6 transition-colors", aiOpen ? "bg-[var(--color-muted)]" : "hover:bg-[var(--color-muted)]")} onClick={() => setAiOpen((v) => !v)} title="Painel AI">
                   <Sparkles size={13} className="text-[#d4774e]" />
                 </Button>
               </>

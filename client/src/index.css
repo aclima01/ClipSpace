@@ -4,6 +4,7 @@
   /* Claude mobile palette — dark-first */
   --color-background: hsl(0 0% 4%);
   --color-foreground: hsl(0 0% 96%);
+  --color-white: hsl(0 0% 100%);
   --color-card: hsl(0 0% 10%);
   --color-card-foreground: hsl(0 0% 96%);
   --color-muted: hsl(0 0% 14%);
@@ -34,6 +35,21 @@ body {
   font-size: 13px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+.sidebar-nav {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  font-family: "Anthropic Sans", system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-feature-settings: normal;
+  font-size: 14px;
+  font-variation-settings: normal;
+  font-weight: 430;
+  line-height: 20px;
+  tab-size: 4;
+  text-wrap-mode: nowrap;
+  white-space-collapse: collapse;
+  color: #ffffff;
 }
 
 .search-highlight {

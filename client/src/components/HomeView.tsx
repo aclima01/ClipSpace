@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Copy, Check, ArrowUpRight, RefreshCw, PanelLeft, PanelLeftClose, ChevronDown, Sparkles, Square, Eye, Code2 } from "lucide-react";
+import { Copy, Check, ArrowUpRight, RefreshCw, PanelLeft, PanelLeftClose, Sparkles, Square, Eye, Code2, House } from "lucide-react";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { saveCache, loadCache } from "@/lib/offlineCache";
 import type { Message } from "../types";
 
 // ── Task link rehype plugin ────────────────────────────────────────────────────
@@ -73,6 +74,27 @@ function staleLabel(iso: string): string | null {
   return null;
 }
 
+function ServerStatusBadge({ serverOnline, syncing }: { serverOnline: boolean; syncing: boolean }) {
+  if (syncing) return (
+    <span className="shrink-0 flex items-center gap-1 font-mono text-[11px] text-amber-500/80">
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+      sincronizando
+    </span>
+  );
+  if (serverOnline) return (
+    <span className="shrink-0 flex items-center gap-1 font-mono text-[11px] text-green-500/70">
+      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+      online
+    </span>
+  );
+  return (
+    <span className="shrink-0 flex items-center gap-1 font-mono text-[11px] text-red-500/70">
+      <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+      offline
+    </span>
+  );
+}
+
 const LAST_VISIT_KEY = "clipspace:lastVisit";
 
 interface FeedItem extends Message {
@@ -110,11 +132,22 @@ interface BriefingData {
   recentPages: RecentPage[];
 }
 
+interface HomeStats {
+  messagesToday: number;
+  openTodos: number;
+  totalPages: number;
+  totalNotebooks: number;
+}
+
 interface HomeViewProps {
   onNavigate: (pageId: string, messageId: string) => void;
   refreshTrigger: number;
   onToggleSidebar: () => void;
   sidebarOpen: boolean;
+  serverOnline: boolean;
+  syncing: boolean;
+  onStatsUpdated: (stats: HomeStats) => void;
+  activeSection: "briefing" | "todos" | "feed";
 }
 
 async function copyToClipboard(text: string) {
@@ -138,14 +171,6 @@ function formatRelative(iso: string): string {
   return `${Math.floor(h / 24)}d`;
 }
 
-function Stat({ value, label }: { value: number; label: string }) {
-  return (
-    <div className="flex-1 bg-[var(--color-card)] border border-[var(--color-border)] rounded-xl px-4 py-3">
-      <div className="text-2xl font-semibold text-[var(--color-foreground)]">{value}</div>
-      <div className="text-[11px] text-[var(--color-muted-foreground)] mt-0.5">{label}</div>
-    </div>
-  );
-}
 
 function FeedCard({ item, onNavigate, onNavigateToTask }: {
   item: FeedItem;
@@ -207,15 +232,13 @@ function FeedCard({ item, onNavigate, onNavigateToTask }: {
   );
 }
 
-export function HomeView({ onNavigate, refreshTrigger, onToggleSidebar, sidebarOpen }: HomeViewProps) {
+export function HomeView({ onNavigate, refreshTrigger, onToggleSidebar, sidebarOpen, serverOnline, syncing, onStatsUpdated, activeSection }: HomeViewProps) {
   const [data, setData] = useState<HomeData | null>(null);
   const [loading, setLoading] = useState(true);
 
   // ── Morning Briefing ────────────────────────────────────────────────────────
   const sinceRef = useRef<string>("");
   const [briefing, setBriefing] = useState<BriefingData | null>(null);
-  const [briefingOpen, setBriefingOpen] = useState(true);
-  const [feedOpen, setFeedOpen] = useState(false);
   const [aiContent, setAiContent] = useState("");
   const [aiGeneratedAt, setAiGeneratedAt] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -283,13 +306,20 @@ export function HomeView({ onNavigate, refreshTrigger, onToggleSidebar, sidebarO
     setLoading(true);
     fetch("/api/home")
       .then((r) => r.json())
-      .then((d: HomeData) => { setData(d); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, []);
+      .then(async (d: HomeData) => {
+        setData(d);
+        setLoading(false);
+        onStatsUpdated(d.stats);
+        await saveCache("home", d);
+      })
+      .catch(async () => {
+        const cached = await loadCache<HomeData>("home");
+        if (cached) { setData(cached); onStatsUpdated(cached.stats); }
+        setLoading(false);
+      });
+  }, [onStatsUpdated]);
 
   useEffect(() => { load(); }, [load, refreshTrigger]);
-
-  const hasBriefingContent = briefing && (briefing.openTodos.length > 0 || briefing.recentPages.length > 0);
 
   const navigateToTask = useCallback(async (taskId: string) => {
     const res = await fetch(`/api/tasks/${taskId}`);
@@ -301,195 +331,191 @@ export function HomeView({ onNavigate, refreshTrigger, onToggleSidebar, sidebarO
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-w-0">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 pb-2 shrink-0"
-        style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}>
-        <div className="flex items-center gap-1.5">
-          <Button size="icon" variant="ghost" onClick={onToggleSidebar} title={sidebarOpen ? "Fechar menu" : "Abrir menu"} className="h-6 w-6 shrink-0">
-            {sidebarOpen ? <PanelLeftClose size={14} /> : <PanelLeft size={14} />}
-          </Button>
-          <span className="text-[13px] font-medium text-[var(--color-muted-foreground)]">home</span>
+      <div
+        className="flex items-center gap-2 border-b border-[var(--color-border)] px-3 pb-2 shrink-0"
+        style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
+      >
+        <Button size="icon" variant="ghost" onClick={onToggleSidebar} title={sidebarOpen ? "Fechar menu" : "Abrir menu"} className="h-6 w-6 shrink-0">
+          {sidebarOpen ? <PanelLeftClose size={14} /> : <PanelLeft size={14} />}
+        </Button>
+        <House size={13} className="shrink-0 text-[var(--color-muted-foreground)]" />
+        <span className="text-[13px] font-medium shrink-0">Home</span>
+        {/* Statusline */}
+        <div className="flex items-center flex-1 min-w-0 overflow-hidden ml-2 gap-0 font-mono text-[11px] text-[var(--color-muted-foreground)]">
+          {data ? (
+            <>
+              <span className="shrink-0">{data.stats.messagesToday} notes hoje</span>
+              <span className="mx-2 opacity-30 shrink-0">·</span>
+              <span className={cn("shrink-0", data.stats.openTodos > 0 ? "text-amber-500/80" : "")}>{data.stats.openTodos} to-dos</span>
+              <span className="mx-2 opacity-30 shrink-0">·</span>
+              <span className="shrink-0">{data.stats.totalPages} pages</span>
+              <span className="mx-2 opacity-30 shrink-0">·</span>
+              <span className="shrink-0">{data.stats.totalNotebooks} notebooks</span>
+            </>
+          ) : (
+            <span className="opacity-30">—</span>
+          )}
         </div>
+        {/* Server status */}
+        <ServerStatusBadge serverOnline={serverOnline} syncing={syncing} />
         <button onClick={() => { load(); loadAiBriefing(); }} title="Atualizar"
-          className={cn("h-6 w-6 flex items-center justify-center text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] transition-colors", loading && "animate-spin opacity-50")}>
+          className={cn("h-6 w-6 flex items-center justify-center text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] transition-colors shrink-0", loading && "animate-spin opacity-50")}>
           <RefreshCw size={13} />
         </button>
       </div>
 
       <ScrollArea className="flex-1">
-        {data && (
-          <>
-            {/* Stats */}
-            <div className="flex gap-2 p-4">
-              <Stat value={data.stats.messagesToday} label="notes hoje" />
-              <Stat value={data.stats.openTodos} label="to-dos abertos" />
-              <Stat value={data.stats.totalPages} label="pages" />
-              <Stat value={data.stats.totalNotebooks} label="notebooks" />
-            </div>
-
-            {/* Morning Briefing */}
-            <div className="px-4 mb-4">
-              <div className="flex items-center justify-between mb-2">
-                <button
-                  className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-muted-foreground)] uppercase tracking-widest hover:text-[var(--color-foreground)] transition-colors"
-                  onClick={() => setBriefingOpen((v) => !v)}
-                >
-                  <span>morning briefing</span>
-                  {(aiContent || hasBriefingContent) && (
-                    <ChevronDown size={10} className={cn("transition-transform duration-150", briefingOpen && "rotate-180")} />
-                  )}
-                </button>
-
-                {/* AI button — always visible */}
-                <div className="flex items-center gap-2">
-                  {aiGeneratedAt && !aiLoading && (
-                    <span className="text-[10px] text-[var(--color-muted-foreground)] opacity-50">
-                      {formatRelative(aiGeneratedAt)}
-                    </span>
-                  )}
-                  <button
-                    onClick={generateAiBriefing}
-                    disabled={aiLoading}
-                    className={cn(
-                      "flex items-center gap-1 text-[12px] transition-colors",
-                      aiLoading
-                        ? "text-[var(--color-muted-foreground)] opacity-50 cursor-default"
-                        : "text-[#d4774e] hover:opacity-80"
-                    )}
-                  >
-                    <Sparkles size={11} />
-                    {aiLoading ? "gerando…" : aiContent ? "regenerar" : "gerar com AI"}
-                  </button>
-                </div>
-              </div>
-
-              {briefingOpen && (
-                <>
-                  {/* AI narrative */}
-                  {aiContent && (
-                    <div className="md-preview text-xs border border-[var(--color-border)] rounded-sm px-3 py-2.5 mb-2">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        rehypePlugins={[rehypeTaskLinks]}
-                        components={{
-                          a: ({ href, children }) => {
-                            if (href?.startsWith("#TK-")) {
-                              return (
-                                <a className="task-link" href={href} onClick={(e) => { e.preventDefault(); navigateToTask(href.slice(1)); }}>
-                                  {children}
-                                </a>
-                              );
-                            }
-                            return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
-                          },
-                        }}
-                      >
-                        {aiContent}
-                      </ReactMarkdown>
-                    </div>
-                  )}
-
-                  {/* Data section — only when there's content */}
-                  {hasBriefingContent && (
-                <div className="border border-[var(--color-border)] rounded-sm">
-                  {briefing!.openTodos.length > 0 && (
-                    <div className="px-3 py-2.5 border-b border-[var(--color-border)]">
-                      <p className="text-[10px] font-medium text-[var(--color-muted-foreground)] uppercase tracking-widest mb-2">
-                        to-dos abertos
-                      </p>
-                      <div className="flex flex-col gap-2">
-                        {briefing!.openTodos.map((group) => (
-                          <div key={group.pageId}>
-                            <div className="flex items-center gap-1.5 mb-1">
-                              <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", staleDotClass(group.pageUpdatedAt))} />
-                              <button onClick={() => onNavigate(group.pageId, "")}
-                                className="text-[11px] text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] transition-colors">
-                                {group.notebookTitle} / {group.pageTitle}
-                              </button>
-                              {staleLabel(group.pageUpdatedAt) && (
-                                <span className={cn(
-                                  "text-[9px] ml-auto shrink-0",
-                                  staleDays(group.pageUpdatedAt) >= 7 ? "text-red-500" : "text-[var(--color-muted-foreground)] opacity-60"
-                                )}>
-                                  {staleLabel(group.pageUpdatedAt)}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex flex-col gap-0.5 pl-2">
-                              {group.items.map((item, i) => {
-                                const taskMatch = item.match(/#TK-\d+/);
-                                const taskId = taskMatch ? taskMatch[0].slice(1) : null;
-                                return (
-                                  <button
-                                    key={i}
-                                    onClick={() => taskId ? navigateToTask(taskId) : onNavigate(group.pageId, "")}
-                                    className="flex items-start gap-1.5 text-left hover:opacity-70 transition-opacity"
-                                  >
-                                    <Square size={10} className="shrink-0 mt-0.5 text-[var(--color-muted-foreground)]" />
-                                    <span className="text-[12px] text-[var(--color-foreground)] leading-relaxed break-words">{item}</span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {briefing!.recentPages.length > 0 && (
-                    <div className="px-3 py-2.5">
-                      <p className="text-[10px] font-medium text-[var(--color-muted-foreground)] uppercase tracking-widest mb-2">
-                        atividade desde sua última visita
-                      </p>
-                      <div className="flex flex-col gap-1">
-                        {briefing!.recentPages.map((page) => (
-                          <button key={page.pageId} onClick={() => onNavigate(page.pageId, "")}
-                            className="flex items-center gap-2 text-left hover:bg-[var(--color-muted)]/40 transition-colors rounded-sm px-1 py-0.5">
-                            <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", staleDotClass(page.updatedAt))} />
-                            <span className="text-[12px] text-[var(--color-foreground)] truncate flex-1">
-                              {page.notebookTitle} / {page.pageTitle}
-                            </span>
-                            <span className="text-[10px] text-[var(--color-muted-foreground)] shrink-0">
-                              {page.newMessages > 0 ? `+${page.newMessages}` : formatRelative(page.updatedAt)}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* Activity feed */}
-            <div className="px-4 pb-4">
-              <button
-                className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--color-muted-foreground)] uppercase tracking-widest hover:text-[var(--color-foreground)] transition-colors mb-2"
-                onClick={() => setFeedOpen((v) => !v)}
-              >
-                <span>atividade recente</span>
-                <ChevronDown size={10} className={cn("transition-transform duration-150", feedOpen && "rotate-180")} />
-              </button>
-              {feedOpen && (
-                <>
-                  {data.feed.length === 0 && (
-                    <p className="text-[12px] text-[var(--color-muted-foreground)] opacity-60 text-center py-8">sem mensagens ainda</p>
-                  )}
-                  <div className="flex flex-col gap-1.5">
-                    {data.feed.map((item) => (
-                      <FeedCard key={item.id} item={item} onNavigate={onNavigate} onNavigateToTask={navigateToTask} />
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          </>
-        )}
-
         {!data && !loading && (
           <p className="text-[12px] text-[var(--color-muted-foreground)] text-center py-12">erro ao carregar</p>
+        )}
+
+        {/* ── Briefing Matinal ───────────────────────────────────────────────── */}
+        {activeSection === "briefing" && (
+          <div className="px-4 py-4">
+            {/* AI generate button */}
+            <div className="flex items-center justify-end gap-2 mb-3">
+              {aiGeneratedAt && !aiLoading && (
+                <span className="text-[10px] text-[var(--color-muted-foreground)] opacity-50">
+                  {formatRelative(aiGeneratedAt)}
+                </span>
+              )}
+              <button
+                onClick={generateAiBriefing}
+                disabled={aiLoading}
+                className={cn(
+                  "flex items-center gap-1 text-[12px] transition-colors",
+                  aiLoading
+                    ? "text-[var(--color-muted-foreground)] opacity-50 cursor-default"
+                    : "text-[#d4774e] hover:opacity-80"
+                )}
+              >
+                <Sparkles size={11} />
+                {aiLoading ? "gerando…" : aiContent ? "regenerar" : "gerar com AI"}
+              </button>
+            </div>
+
+            {/* AI narrative */}
+            {aiContent && (
+              <div className="md-preview text-xs border border-[var(--color-border)] rounded-sm px-3 py-2.5 mb-3">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeTaskLinks]}
+                  components={{
+                    a: ({ href, children }) => {
+                      if (href?.startsWith("#TK-")) {
+                        return (
+                          <a className="task-link" href={href} onClick={(e) => { e.preventDefault(); navigateToTask(href.slice(1)); }}>
+                            {children}
+                          </a>
+                        );
+                      }
+                      return <a href={href} target="_blank" rel="noreferrer">{children}</a>;
+                    },
+                  }}
+                >
+                  {aiContent}
+                </ReactMarkdown>
+              </div>
+            )}
+
+            {/* Recent pages */}
+            {briefing && briefing.recentPages.length > 0 && (
+              <div className="border border-[var(--color-border)] rounded-sm">
+                <div className="px-3 py-2.5">
+                  <p className="text-[10px] font-medium text-[var(--color-muted-foreground)] uppercase tracking-widest mb-2">
+                    atividade desde sua última visita
+                  </p>
+                  <div className="flex flex-col gap-1">
+                    {briefing.recentPages.map((page) => (
+                      <button key={page.pageId} onClick={() => onNavigate(page.pageId, "")}
+                        className="flex items-center gap-2 text-left hover:bg-[var(--color-muted)]/40 transition-colors rounded-sm px-1 py-0.5">
+                        <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", staleDotClass(page.updatedAt))} />
+                        <span className="text-[12px] text-[var(--color-foreground)] truncate flex-1">
+                          {page.notebookTitle} / {page.pageTitle}
+                        </span>
+                        <span className="text-[10px] text-[var(--color-muted-foreground)] shrink-0">
+                          {page.newMessages > 0 ? `+${page.newMessages}` : formatRelative(page.updatedAt)}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!aiContent && (!briefing || briefing.recentPages.length === 0) && !aiLoading && (
+              <p className="text-[12px] text-[var(--color-muted-foreground)] opacity-50 text-center py-8">
+                nenhuma informação disponível
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ── To-dos ────────────────────────────────────────────────────────── */}
+        {activeSection === "todos" && (
+          <div className="px-4 py-4">
+            {!briefing ? (
+              <p className="text-[12px] text-[var(--color-muted-foreground)] opacity-50 text-center py-8">
+                carregando…
+              </p>
+            ) : briefing.openTodos.length === 0 ? (
+              <p className="text-[12px] text-[var(--color-muted-foreground)] opacity-50 text-center py-8">
+                nenhum to-do aberto
+              </p>
+            ) : (
+              <div className="border border-[var(--color-border)] rounded-sm">
+                <div className="px-3 py-2.5">
+                  <div className="flex flex-col gap-2">
+                    {briefing.openTodos.map((group) => (
+                      <div key={group.pageId}>
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", staleDotClass(group.pageUpdatedAt))} />
+                          <button onClick={() => onNavigate(group.pageId, "")}
+                            className="text-[11px] text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] transition-colors">
+                            {group.notebookTitle} / {group.pageTitle}
+                          </button>
+                          {staleLabel(group.pageUpdatedAt) && (
+                            <span className={cn("text-[9px] ml-auto shrink-0", staleDays(group.pageUpdatedAt) >= 7 ? "text-red-500" : "text-[var(--color-muted-foreground)] opacity-60")}>
+                              {staleLabel(group.pageUpdatedAt)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-0.5 pl-2">
+                          {group.items.map((item, i) => {
+                            const taskMatch = item.match(/#TK-\d+/);
+                            const taskId = taskMatch ? taskMatch[0].slice(1) : null;
+                            return (
+                              <button key={i} onClick={() => taskId ? navigateToTask(taskId) : onNavigate(group.pageId, "")} className="flex items-start gap-1.5 text-left hover:opacity-70 transition-opacity">
+                                <Square size={10} className="shrink-0 mt-0.5 text-[var(--color-muted-foreground)]" />
+                                <span className="text-[12px] text-[var(--color-foreground)] leading-relaxed break-words">{item}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Atividade Recente ──────────────────────────────────────────────── */}
+        {activeSection === "feed" && data && (
+          <div className="px-4 py-4">
+            {data.feed.length === 0 ? (
+              <p className="text-[12px] text-[var(--color-muted-foreground)] opacity-60 text-center py-8">
+                sem mensagens ainda
+              </p>
+            ) : (
+              <div className="flex flex-col gap-1.5">
+                {data.feed.map((item) => (
+                  <FeedCard key={item.id} item={item} onNavigate={onNavigate} onNavigateToTask={navigateToTask} />
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </ScrollArea>
     </div>

@@ -4,6 +4,8 @@ import { ChatArea } from "./components/ChatArea";
 import { HomeView } from "./components/HomeView";
 import { SearchOverlay } from "./components/SearchOverlay";
 import { TooltipProvider } from "./components/ui/tooltip";
+import { useServerStatus } from "./hooks/useServerStatus";
+import { saveCache, loadCache, loadQueue, removeFromQueue } from "./lib/offlineCache";
 import type { NotebookWithPages, Page } from "./types";
 
 const STORAGE_KEY = "clipspace:deviceName";
@@ -33,12 +35,14 @@ export default function App() {
   const [notebooks, setNotebooks] = useState<NotebookWithPages[]>([]);
   const [activePageId, setActivePageId] = useState<string | null>(null);
   const [deviceName, setDeviceName] = useState<string>(loadDeviceName);
-  const [connectedCount, setConnectedCount] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 640);
   const [unreadIds, setUnreadIds] = useState<ReadonlySet<string>>(new Set());
   const [searchOpen, setSearchOpen] = useState(false);
   const [targetMessageId, setTargetMessageId] = useState<string | null>(null);
   const [homeRefresh, setHomeRefresh] = useState(0);
+  const [chatRefresh, setChatRefresh] = useState(0);
+  const [homeStats, setHomeStats] = useState<{ messagesToday: number; openTodos: number; totalPages: number; totalNotebooks: number } | null>(null);
+  const [homeSection, setHomeSection] = useState<"briefing" | "todos" | "feed">("briefing");
 
   const activePageIdRef = useRef(activePageId);
   useEffect(() => { activePageIdRef.current = activePageId; }, [activePageId]);
@@ -55,12 +59,44 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Initial load
+  // Initial load — with cache fallback for offline startup
   useEffect(() => {
     fetch("/api/notebooks")
       .then((r) => r.json())
-      .then((data: NotebookWithPages[]) => setNotebooks(data));
+      .then(async (data: NotebookWithPages[]) => {
+        setNotebooks(data);
+        await saveCache("notebooks", data);
+      })
+      .catch(async () => {
+        const cached = await loadCache<NotebookWithPages[]>("notebooks");
+        if (cached) setNotebooks(cached);
+      });
   }, []);
+
+  // ── Offline sync ───────────────────────────────────────────────────────────
+
+  const handleReconnect = useCallback(async () => {
+    const queue = await loadQueue();
+    for (const op of queue) {
+      try {
+        const res = await fetch(`/api/pages/${op.pageId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: op.content, deviceName: op.deviceName }),
+        });
+        if (res.ok || res.status < 500) await removeFromQueue(op.id);
+      } catch { /* network error — keep in queue */ }
+    }
+    try {
+      const data: NotebookWithPages[] = await fetch("/api/notebooks").then((r) => r.json());
+      setNotebooks(data);
+      await saveCache("notebooks", data);
+    } catch { /* ignore */ }
+    setChatRefresh((n) => n + 1);
+    setHomeRefresh((n) => n + 1);
+  }, []);
+
+  const { serverOnline, syncing } = useServerStatus({ onReconnect: handleReconnect });
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -136,9 +172,7 @@ export default function App() {
 
   // ── WS event handlers (passed to ChatArea) ─────────────────────────────────
 
-  const handleConnectedCount = useCallback((count: number) => {
-    setConnectedCount(count);
-  }, []);
+  const handleConnectedCount = useCallback((_count: number) => {}, []);
 
   const bringPageToTop = useCallback((pageId: string, notebookId: string, updatedAt: string) => {
     setNotebooks((prev) =>
@@ -297,11 +331,14 @@ export default function App() {
           onNewPage={handleNewPage}
           onRenameNotebook={handleRenameNotebook}
           onRenamePage={handleRenamePage}
-          connectedCount={connectedCount}
+          serverOnline={serverOnline}
+          syncing={syncing}
           deviceName={deviceName}
           onRenameDevice={handleRenameDevice}
           unreadIds={unreadIds}
           onGoHome={() => setActivePageId(null)}
+          homeSection={homeSection}
+          onHomeSectionChange={setHomeSection}
         />
         {activePageId === null ? (
           <HomeView
@@ -312,6 +349,10 @@ export default function App() {
             }}
             onToggleSidebar={() => setSidebarOpen((v) => !v)}
             sidebarOpen={sidebarOpen}
+            serverOnline={serverOnline}
+            syncing={syncing}
+            onStatsUpdated={setHomeStats}
+            activeSection={homeSection}
           />
         ) : (
           <ChatArea
@@ -320,6 +361,10 @@ export default function App() {
             onConnectedCount={handleConnectedCount}
             onToggleSidebar={() => setSidebarOpen((v) => !v)}
             sidebarOpen={sidebarOpen}
+            homeStats={homeStats}
+            serverOnline={serverOnline}
+            syncing={syncing}
+            refreshTrigger={chatRefresh}
             targetMessageId={targetMessageId}
             onTargetReached={() => setTargetMessageId(null)}
             onOpenSearch={() => setSearchOpen(true)}
