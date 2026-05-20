@@ -1,6 +1,25 @@
-# My ClipSpace
+# ClipSpace
 
-Self-hosted local-network clipboard sharing. Share text snippets in real-time across devices on the same Wi-Fi/LAN, organized as named conversations — with markdown preview, global search and a home dashboard.
+Self-hosted note-taking app for local networks. Organized as notebooks → pages → messages, with real-time sync across devices on the same LAN, markdown preview, global search, home dashboard and offline mode.
+
+---
+
+## Features
+
+- **Notebooks & Pages** — two-level hierarchy; sidebar with two-column layout (notebooks column + pages column)
+- **Real-time sync** — WebSocket broadcast; messages appear instantly on all connected devices
+- **Markdown preview** — toggle between raw and rendered view per message; supports GFM tables, task lists, code blocks
+- **Global search** — `Ctrl+K` searches across all notebooks, pages and message content
+- **Home dashboard** — three sections selectable from the sidebar:
+  - **Briefing** — AI-generated narrative (streaming) + pages with activity since last visit
+  - **To-dos** — open `- [ ]` items across all pages, grouped by page, with staleness indicator
+  - **Atividade Recente** — feed of the latest messages from any page
+- **Statusline** — compact stats in every header: notes today · open to-dos · pages · notebooks
+- **Offline mode** — app shell cached by service worker; notebooks and messages cached in IndexedDB; messages created offline are queued and synced automatically when the server is reachable again
+- **Connection indicator** — `● online` / `● offline` / `● sincronizando` in every header and sidebar footer
+- **AI integration** — AI panel per page + morning briefing generation via Anthropic API
+- **Task tracking** — `#TK-N` tokens are clickable links that jump to the originating message
+- **PWA** — installable on iOS, Android and desktop; runs as a standalone app
 
 ---
 
@@ -40,16 +59,21 @@ O servidor imprime o IP da rede local no startup. Outros dispositivos acessam vi
 
 ## Build e Deploy (PM2)
 
-### 1. Build
+### Script rápido
+
+```powershell
+.\deploy.ps1   # build client + server + pm2 restart
+```
+
+### Manual
 
 ```powershell
 cd client && npm run build && cd ..
 cd server && npm run build && cd ..
+pm2 restart clipspace
 ```
 
-O cliente compilado vai para `client/dist/` e é servido estaticamente pelo Express.
-
-### 2. Ecosystem file
+### Ecosystem file
 
 Copie o template e ajuste os paths para sua máquina:
 
@@ -61,26 +85,13 @@ pm2 save
 pm2 startup   # registrar no boot — rode o comando gerado como Administrador
 ```
 
-### 3. Comandos PM2
+### Comandos PM2
 
 ```powershell
 pm2 status
 pm2 logs clipspace
-pm2 logs clipspace-backup
-pm2 restart clipspace       # após rebuild do servidor
-pm2 reload ecosystem.config.js  # recarregar configuração
-```
-
-### 4. Atualizar após mudanças
-
-```powershell
-# Só cliente:
-cd client && npm run build && cd .. && pm2 restart clipspace
-
-# Cliente + servidor:
-cd client && npm run build && cd ..
-cd server && npm run build && cd ..
 pm2 restart clipspace
+pm2 reload ecosystem.config.js
 ```
 
 ---
@@ -95,7 +106,6 @@ HTTPS habilita PWA completo, `navigator.clipboard` nativo e service worker em to
 mkcert -install   # instala CA raiz no Windows/Chrome — rode uma vez
 mkcert <seu-ip-local> localhost 127.0.0.1
 # ex: mkcert 192.168.1.42 localhost 127.0.0.1
-# gera: certs/192.168.1.42+2.pem e certs/192.168.1.42+2-key.pem
 ```
 
 ### 2. Configurar no ecosystem.config.js
@@ -107,12 +117,11 @@ env: {
 }
 ```
 
-Sem as variáveis `TLS_CERT`/`TLS_KEY`, o servidor sobe em HTTP puro (retrocompatível).
+Sem as variáveis `TLS_CERT`/`TLS_KEY`, o servidor sobe em HTTP puro.
 
 ### 3. Instalar a CA raiz nos dispositivos mobile
 
 O arquivo da CA fica em `C:\Users\<user>\AppData\Local\mkcert\rootCA.pem`.
-Sirva temporariamente para download nos outros dispositivos:
 
 ```powershell
 python -m http.server 8080 --directory "C:\Users\<user>\AppData\Local\mkcert"
@@ -129,15 +138,24 @@ python -m http.server 8080 --directory "C:\Users\<user>\AppData\Local\mkcert"
 
 ## PWA — Instalar como app
 
-Com HTTPS ativo, o app pode ser instalado como Progressive Web App:
-
 | Dispositivo | Como instalar |
 |---|---|
 | **iPhone/iPad** | Safari → Compartilhar → Adicionar à Tela de Início |
 | **Android (Chrome)** | Botão "Instalar app" na barra de endereço |
 | **Desktop Chrome/Edge** | Ícone de instalação na barra de endereço |
 
-> **Sem HTTPS:** o manifest funciona, mas service worker e `navigator.clipboard` nativo ficam desativados. O app usa fallbacks automáticos para copiar texto via `execCommand`.
+---
+
+## Modo offline
+
+O app suporta uso offline para single-user:
+
+1. **Acesse uma vez conectado** — notebooks, pages e messages são cacheados no IndexedDB do browser
+2. **Vá offline** — o app continua funcionando com os dados da última sessão
+3. **Crie anotações** — mensagens ficam com indicador `pending` e são salvas em fila local
+4. **Reconecte** — ao detectar o servidor via `GET /api/health`, as mensagens são enviadas automaticamente e os dados são atualizados
+
+O indicador no header muda de `● offline` para `● sincronizando` e depois `● online` conforme o processo.
 
 ---
 
@@ -151,8 +169,8 @@ O `ecosystem.config.js` inclui um processo `clipspace-backup` com cron:
   cron_restart: "0 */6 * * *",  // a cada 6 horas
   autorestart: false,
   env: {
-    BACKUP_DIR: "C:\\Users\\<user>\\OneDrive\\Backups\\ACLNotes",
-    BACKUP_KEEP: "30",  // quantos arquivos manter
+    BACKUP_DIR: "C:\\Users\\<user>\\OneDrive\\Backups\\ClipSpace",
+    BACKUP_KEEP: "30",
   }
 }
 ```
@@ -181,6 +199,7 @@ pm2 logs clipspace-backup --lines 5 --nostream
 | `TLS_KEY` | — | Path para a chave privada `.pem` |
 | `BACKUP_DIR` | `../backups` | Destino dos arquivos de backup |
 | `BACKUP_KEEP` | `30` | Número máximo de backups retidos |
+| `ANTHROPIC_API_KEY` | — | Chave API para geração de briefing AI |
 
 ---
 
@@ -188,54 +207,58 @@ pm2 logs clipspace-backup --lines 5 --nostream
 
 ```
 clipspace/
-├── package.json                   # raiz — scripts dev/build via concurrently
-├── ecosystem.config.example.js    # template PM2 (copiar para ecosystem.config.js)
+├── package.json                   # raiz — scripts dev via concurrently
+├── deploy.ps1                     # build + pm2 restart
+├── ecosystem.config.example.js    # template PM2
 ├── certs/                         # certificados TLS (gitignored)
-├── client/                        # Vite 8 + React 19 + TS 6 + Tailwind CSS v4
+├── client/
 │   ├── public/
-│   │   ├── icon.svg               # ícone PWA
-│   │   ├── manifest.webmanifest   # PWA manifest
-│   │   └── sw.js                  # service worker
+│   │   ├── icon.svg
+│   │   ├── manifest.webmanifest
+│   │   └── sw.js                  # service worker — cache do app shell
 │   └── src/
 │       ├── App.tsx                # root — estado global, roteamento home/chat
 │       ├── components/
-│       │   ├── HomeView.tsx       # dashboard: stats + activity feed
-│       │   ├── Sidebar.tsx        # lista de conversas + device name
+│       │   ├── HomeView.tsx       # dashboard: briefing, to-dos, feed
+│       │   ├── Sidebar.tsx        # duas colunas: notebooks + pages
 │       │   ├── ChatArea.tsx       # área de mensagens + input redimensionável
 │       │   ├── MessageBubble.tsx  # bubble com markdown preview e ações
 │       │   ├── SearchOverlay.tsx  # overlay de busca global (Ctrl+K)
+│       │   ├── AiPanel.tsx        # painel AI lateral por page
 │       │   └── ui/                # Button, Textarea, Input, ScrollArea, etc.
 │       ├── hooks/
-│       │   └── useWebSocket.ts    # conexão WS com reconexão automática
+│       │   ├── useWebSocket.ts    # conexão WS com reconexão automática
+│       │   └── useServerStatus.ts # polling /api/health, detecção offline→online
+│       ├── lib/
+│       │   ├── utils.ts           # cn(), randomUUID()
+│       │   └── offlineCache.ts    # IndexedDB: api cache + fila de operações
 │       └── types.ts
 └── server/
-    ├── index.ts                   # Express HTTP/HTTPS + WebSocket
-    ├── db.ts                      # SQLite queries
-    ├── backup.ts                  # script de backup (rodado pelo PM2 cron)
+    ├── index.ts                   # Express + WebSocket + todas as rotas REST
+    ├── db.ts                      # SQLite queries (better-sqlite3)
+    ├── backup.ts                  # script de backup (PM2 cron)
     ├── clipspace.db               # banco SQLite (gitignored)
     └── dist/                      # build de produção (gitignored)
 ```
 
 ---
 
-## Uso e atalhos
+## Atalhos
 
 | Ação | Como |
 |------|------|
-| Nova conversa | Botão `+` na sidebar |
-| Ir para home | Clique no nome do workspace (topo da sidebar) |
-| Renomear workspace | Duplo clique no nome do workspace |
-| Renomear conversa (desktop) | Duplo clique no título na sidebar |
-| Renomear conversa (mobile/desktop) | Clique no título no header do chat |
+| Nova page | Botão `+` na coluna de pages da sidebar |
+| Novo notebook | Botão `+` no topo da coluna de notebooks |
+| Ir para home | Clique em "Home" na sidebar |
+| Renomear notebook | Duplo clique no notebook na sidebar |
+| Renomear page | Duplo clique na page na sidebar, ou clique no título no header |
 | Enviar mensagem | `Ctrl+Enter` ou botão enviar |
 | Busca global | `Ctrl+K` ou ícone de busca no header |
 | Copiar mensagem | Ícone de cópia no meta row da mensagem |
-| Preview markdown | Toggle `Code2/Eye` no meta row |
-| Copiar como HTML | Ícone `ClipboardList` no meta row |
-| Excluir mensagem | Ícone `Trash2` → confirmar |
+| Toggle markdown preview | Ícone `Code2/Eye` no meta row |
 | Redimensionar input | Arrastar a alça no topo do painel de input |
 | Renomear dispositivo | Clique no nome no rodapé da sidebar |
-| Recolher sidebar | Botão `PanelLeft` no header do chat |
+| Recolher sidebar | Botão `PanelLeft` no header |
 
 ---
 
@@ -244,11 +267,10 @@ clipspace/
 SQLite via `better-sqlite3` (WAL mode). O arquivo é criado automaticamente no primeiro startup. Schema via `CREATE TABLE IF NOT EXISTS` — sem migrations manuais.
 
 ```sql
-CREATE TABLE conversations (id, title, created_at, updated_at);
-CREATE TABLE messages (id, conversation_id, content, device_name, created_at);
+CREATE TABLE notebooks (id, title, created_at, updated_at);
+CREATE TABLE pages (id, notebook_id, title, created_at, updated_at);
+CREATE TABLE messages (id, page_id, content, device_name, created_at, pinned);
 ```
-
-Backup manual: copie `server/clipspace.db`.
 
 ---
 
