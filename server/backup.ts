@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 
-const DB_PATH = path.join(__dirname, "clipspace.db");
+const DB_PATH = process.env.DB_PATH ?? path.join(__dirname, "clipspace.db");
 const BACKUP_DIR = process.env.BACKUP_DIR ?? path.join(__dirname, "..", "backups");
 const KEEP = parseInt(process.env.BACKUP_KEEP ?? "30", 10);
 

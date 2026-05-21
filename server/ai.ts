@@ -196,6 +196,53 @@ export function clearAISession(pageId: string): void {
   dbClearAISession(pageId);
 }
 
+// ── Message improvement ────────────────────────────────────────────────────────
+
+const IMPROVE_SYSTEM_PROMPT = `Você é um editor de notas no ClipSpace.
+Melhore a mensagem fornecida seguindo estas diretrizes, nesta ordem:
+
+1. **Correção gramatical** — corrija erros de ortografia, pontuação e gramática (português)
+2. **Melhoria textual** — torne o texto mais claro e conciso sem alterar o significado
+3. **Novas tasks** — se houver ações implícitas não rastreadas, formate como checkboxes: \`- [ ] descrição\`
+   - Não replique tasks que já possuem ID (#TK-XXXX) — referencie pelo ID
+4. **Observações** — se houver algo importante a destacar, adicione ao final com **⚠ Observação:** ou **📌 Nota:**
+
+Retorne APENAS o conteúdo markdown melhorado — sem preâmbulo, sem explicação.
+Melhore a estrutura e formato, buscando uma padronização das anotações do usuário. O objetivo é criar uma mensagem mais legível, organizada e útil para acompanhamento futuro.`;
+
+export function buildImproveContext(pageId: string, excludeId: string): string {
+  const msgs = getMessages(pageId).filter((m) => m.id !== excludeId).slice(-15);
+  if (msgs.length === 0) return "";
+  return msgs
+    .map((m) => `[${m.device_name}]: ${m.content.slice(0, 300)}`)
+    .join("\n\n---\n\n");
+}
+
+export async function improveMessage(
+  content: string,
+  pageContext: string,
+  notebookInstructions: string,
+  onToken: (token: string) => void
+): Promise<void> {
+  const systemPrompt = notebookInstructions.trim()
+    ? `${IMPROVE_SYSTEM_PROMPT}\n\n---\n\nInstruções do notebook:\n${notebookInstructions}`
+    : IMPROVE_SYSTEM_PROMPT;
+
+  const userContent = pageContext
+    ? `Contexto da page (últimas mensagens):\n\n${pageContext}\n\n---\n\nMensagem a melhorar:\n\n${content}`
+    : `Mensagem a melhorar:\n\n${content}`;
+
+  await streamWithRetry(
+    {
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userContent }],
+    },
+    onToken
+  );
+}
+
 // ── Morning Briefing ───────────────────────────────────────────────────────────
 
 const BRIEFING_SYSTEM_PROMPT = `You are a productivity assistant embedded in ClipSpace.

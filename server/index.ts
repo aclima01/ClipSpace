@@ -29,9 +29,10 @@ import {
   findTaskMessage,
   saveBriefing,
   loadBriefing,
+  getMessage,
 } from "./db";
 import db from "./db";
-import { chatWithAI, clearAISession, streamBriefing } from "./ai";
+import { chatWithAI, clearAISession, streamBriefing, improveMessage, buildImproveContext } from "./ai";
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3001", 10);
@@ -260,6 +261,37 @@ app.delete("/api/messages/:id", (req, res) => {
   if (!pageId) return res.status(404).json({ error: "not found" });
   broadcastToPage(pageId, { type: "message_deleted", messageId: req.params.id, pageId });
   res.json({ ok: true });
+});
+
+app.post("/api/messages/:id/improve", async (req, res) => {
+  if (!process.env.ANTHROPIC_API_KEY)
+    return res.status(503).json({ error: "ANTHROPIC_API_KEY not configured" });
+
+  const message = getMessage(req.params.id);
+  if (!message) return res.status(404).json({ error: "not found" });
+
+  const { pageId } = req.body as { pageId?: string };
+  if (!pageId) return res.status(400).json({ error: "pageId required" });
+
+  const page = getPage(pageId);
+  const context = buildImproveContext(pageId, req.params.id);
+  const instructions = page ? getNotebookAiInstructions(page.notebook_id) : "";
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const send = (data: unknown) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+  try {
+    await improveMessage(message.content, context, instructions, (t) => send({ type: "token", content: t }));
+    send({ type: "done" });
+  } catch (e) {
+    send({ type: "error", message: String(e) });
+  }
+
+  res.end();
 });
 
 // ── Briefing ───────────────────────────────────────────────────────────────────

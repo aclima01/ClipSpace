@@ -1,0 +1,34 @@
+services:
+  clipspace:
+    build: .
+    container_name: clipspace
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data:/data
+      # TLS certs (optional — uncomment and set TLS_CERT/TLS_KEY below)
+      # - ./certs:/certs:ro
+    environment:
+      - DB_PATH=/data/clipspace.db
+      - PORT=3001
+      # AI (required for briefing and AI features)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # TLS (optional — requires certs volume above)
+      # - TLS_CERT=/certs/cert.pem
+      # - TLS_KEY=/certs/key.pem
+
+  # Backup — run via cron: docker compose run --rm backup
+  # Host cron example: 0 */6 * * * cd /opt/clipspace && docker compose run --rm backup
+  backup:
+    build: .
+    command: node server/dist/backup.js
+    volumes:
+      - ./data:/data
+      - ./backups:/backups
+    environment:
+      - DB_PATH=/data/clipspace.db
+      - BACKUP_DIR=/backups
+      - BACKUP_KEEP=30
+    profiles:
+      - backup

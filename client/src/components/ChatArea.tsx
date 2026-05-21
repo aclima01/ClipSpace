@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Send, PanelLeft, PanelLeftClose, Eraser, Trash2, Search, Sparkles, Pin, ChevronDown, FileText } from "lucide-react";
+import { Send, PanelLeft, PanelLeftClose, Eraser, Trash2, Search, Sparkles, Pin, ChevronDown, FileText, LayoutTemplate, X } from "lucide-react";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
 import { ScrollArea } from "./ui/scroll-area";
@@ -8,6 +8,7 @@ import { AiPanel } from "./AiPanel";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { randomUUID, cn } from "@/lib/utils";
 import { saveCache, loadCache, enqueueMessage } from "@/lib/offlineCache";
+import { TEMPLATES } from "@/lib/templates";
 import type { Page, LocalMessage } from "../types";
 
 const CONFIRM_TIMEOUT_MS = 5000;
@@ -89,11 +90,13 @@ export function ChatArea({
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [text, setText] = useState("");
   const [aiOpen, setAiOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [pinnedExpanded, setPinnedExpanded] = useState(true);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const prevMsgCountRef = useRef(0);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   // Resizable input panel
@@ -158,8 +161,16 @@ export function ChatArea({
   }, [page?.id, refreshTrigger]);
 
   useEffect(() => {
-    if (targetMessageId) return;
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const newCount = messages.length;
+    if (targetMessageId) {
+      prevMsgCountRef.current = newCount;
+      return;
+    }
+    const prevCount = prevMsgCountRef.current;
+    prevMsgCountRef.current = newCount;
+    if (newCount > prevCount) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages, targetMessageId]);
 
   useEffect(() => {
@@ -315,6 +326,13 @@ export function ChatArea({
     }
   };
 
+  const handleTemplateSelect = (content: string) => {
+    const current = text.trim();
+    setText(current ? `${current}\n\n${content}` : content);
+    setTemplateOpen(false);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  };
+
   return (
     <div className="flex flex-1 overflow-hidden min-w-0">
       <div className="flex flex-1 flex-col overflow-hidden min-w-0">
@@ -448,6 +466,7 @@ export function ChatArea({
                   key={msg.clientId ?? msg.id}
                   message={msg}
                   isOwn={msg.device_name === deviceName}
+                  pageId={page?.id ?? ""}
                   isTarget={msg.id === targetMessageId}
                   onDelete={async () => {
                     await fetch(`/api/messages/${msg.id}`, { method: "DELETE" });
@@ -471,6 +490,33 @@ export function ChatArea({
               ))}
               <div ref={bottomRef} />
             </ScrollArea>
+
+            {/* Template picker */}
+            {templateOpen && (
+              <div className="shrink-0 border-t border-[var(--color-border)] bg-[var(--color-card)]">
+                <div className="flex items-center px-3 py-1 border-b border-[var(--color-border)]">
+                  <span className="text-[10px] font-medium text-[var(--color-muted-foreground)] uppercase tracking-widest">templates</span>
+                  <button
+                    onClick={() => setTemplateOpen(false)}
+                    className="ml-auto h-5 w-5 flex items-center justify-center text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] transition-colors"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-1 p-2">
+                  {TEMPLATES.map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => handleTemplateSelect(t.content())}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded-md text-left hover:bg-[var(--color-muted)] transition-colors"
+                    >
+                      <span className="text-[13px] shrink-0">{t.emoji}</span>
+                      <span className="text-[11px] text-[var(--color-foreground)] truncate">{t.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Drag handle */}
             <div
@@ -499,16 +545,30 @@ export function ChatArea({
                   placeholder="colar ou escrever aqui…"
                   className="flex-1 h-full resize-none"
                 />
-                <Button
-                  size="icon"
-                  variant="default"
-                  onClick={handleSend}
-                  disabled={!text.trim()}
-                  title="Enviar (Ctrl+Enter)"
-                  className="shrink-0 self-end"
-                >
-                  <Send size={13} />
-                </Button>
+                <div className="flex flex-col gap-1 self-end shrink-0">
+                  <button
+                    onClick={() => setTemplateOpen((v) => !v)}
+                    title="Templates"
+                    className={cn(
+                      "h-7 w-7 flex items-center justify-center rounded-md transition-colors",
+                      templateOpen
+                        ? "text-[var(--color-foreground)] bg-[var(--color-muted)]"
+                        : "text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
+                    )}
+                  >
+                    <LayoutTemplate size={13} />
+                  </button>
+                  <Button
+                    size="icon"
+                    variant="default"
+                    onClick={handleSend}
+                    disabled={!text.trim()}
+                    title="Enviar (Ctrl+Enter)"
+                    className="shrink-0"
+                  >
+                    <Send size={13} />
+                  </Button>
+                </div>
               </div>
               <p className="mt-1 text-[11px] text-[var(--color-muted-foreground)] opacity-60">
                 ctrl+enter para enviar

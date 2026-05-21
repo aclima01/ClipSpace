@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import path from "path";
 import { randomUUID } from "crypto";
 
-const DB_PATH = path.join(__dirname, "clipspace.db");
+const DB_PATH = process.env.DB_PATH ?? path.join(__dirname, "clipspace.db");
 const db = new Database(DB_PATH);
 
 db.pragma("journal_mode = WAL");
@@ -300,6 +300,14 @@ function touchPage(id: string): string {
 }
 
 // ── Messages ───────────────────────────────────────────────────────────────────
+
+export function getMessage(id: string): Message | null {
+  const row = db.prepare("SELECT * FROM messages WHERE id = ?").get(id) as
+    | (Omit<Message, "pinned"> & { pinned: number })
+    | undefined;
+  if (!row) return null;
+  return { ...row, pinned: row.pinned === 1 };
+}
 
 export function getMessages(pageId: string): Message[] {
   const rows = db

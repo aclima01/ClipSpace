@@ -1,7 +1,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Clock, AlertTriangle, Code2, Eye, Copy, ClipboardList, Check, Trash2, Pencil, X, Pin, PinOff } from "lucide-react";
+import { Clock, AlertTriangle, Code2, Eye, Copy, ClipboardList, Check, Trash2, Pencil, X, Pin, PinOff, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { LocalMessage } from "../types";
 
@@ -119,6 +119,7 @@ function WithMentions({ text }: { text: string }) {
 interface MessageBubbleProps {
   message: LocalMessage;
   isOwn: boolean;
+  pageId: string;
   isTarget?: boolean;
   onDelete: () => Promise<void>;
   onEdit: (content: string) => Promise<void>;
@@ -196,13 +197,15 @@ function toggleCheckboxAt(content: string, index: number): string {
   });
 }
 
-export function MessageBubble({ message, isOwn, isTarget = false, onDelete, onEdit, onPin, onNavigateToTask }: MessageBubbleProps) {
+export function MessageBubble({ message, isOwn, pageId, isTarget = false, onDelete, onEdit, onPin, onNavigateToTask }: MessageBubbleProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedPreview, setCopiedPreview] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editValue, setEditValue] = useState("");
+  const [improving, setImproving] = useState(false);
+  const [improvedContent, setImprovedContent] = useState<string | null>(null);
 
   const handleCopyCode = async () => {
     await copyToClipboard(message.content);
@@ -220,6 +223,44 @@ export function MessageBubble({ message, isOwn, isTarget = false, onDelete, onEd
     await copyHtmlToClipboard(html, message.content);
     setCopiedPreview(true);
     setTimeout(() => setCopiedPreview(false), 1500);
+  };
+
+  const handleImprove = async () => {
+    if (improving) return;
+    setImprovedContent(null);
+    setImproving(true);
+    try {
+      const res = await fetch(`/api/messages/${message.id}/improve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pageId }),
+      });
+      if (!res.ok || !res.body) { setImproving(false); return; }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      let accumulated = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() ?? "";
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const evt = JSON.parse(line.slice(6)) as { type: string; content?: string };
+            if (evt.type === "token" && evt.content) {
+              accumulated += evt.content;
+              setImprovedContent(accumulated);
+            } else if (evt.type === "done") {
+              setImproving(false);
+            }
+          } catch { /**/ }
+        }
+      }
+    } catch { setImproving(false); }
   };
 
   const isPending = message.status === "pending";
@@ -334,6 +375,40 @@ export function MessageBubble({ message, isOwn, isTarget = false, onDelete, onEd
         })()}
       </div>
 
+      {/* AI improve preview */}
+      {(improving || improvedContent !== null) && (
+        <div className="w-full mt-1.5 border border-[var(--color-border)] rounded-xl px-3 py-2.5 bg-[var(--color-card)]">
+          {improving && !improvedContent ? (
+            <div className="flex gap-1 py-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-muted-foreground)] opacity-60 animate-bounce" style={{ animationDelay: "0ms" }} />
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-muted-foreground)] opacity-60 animate-bounce" style={{ animationDelay: "150ms" }} />
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-muted-foreground)] opacity-60 animate-bounce" style={{ animationDelay: "300ms" }} />
+            </div>
+          ) : (
+            <div className="md-preview text-xs">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{improvedContent ?? ""}</ReactMarkdown>
+            </div>
+          )}
+          {!improving && improvedContent !== null && (
+            <div className="flex items-center gap-3 mt-2 pt-2 border-t border-[var(--color-border)]">
+              <button
+                onClick={async () => { await onEdit(improvedContent.trim()); setImprovedContent(null); }}
+                className="text-[10px] text-[var(--color-foreground)] hover:opacity-70 transition-opacity"
+              >
+                aplicar
+              </button>
+              <span className="text-[10px] font-mono text-[var(--color-muted-foreground)] opacity-40">substitui in-place</span>
+              <button
+                onClick={() => setImprovedContent(null)}
+                className="ml-auto text-[10px] text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] transition-colors"
+              >
+                cancelar
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Meta row */}
       <div className={cn(
         "flex items-center flex-wrap gap-x-1.5 gap-y-0.5 mt-1",
@@ -398,6 +473,16 @@ export function MessageBubble({ message, isOwn, isTarget = false, onDelete, onEd
             setEditValue(message.content);
             setEditMode(true);
           }}
+        />
+
+        <span className="text-[var(--color-border)] text-[10px] select-none">·</span>
+
+        {/* AI improve */}
+        <MetaButton
+          icon={<Wand2 size={11} />}
+          title="Melhorar com AI"
+          active={improving || improvedContent !== null}
+          onClick={handleImprove}
         />
 
         <span className="text-[var(--color-border)] text-[10px] select-none">·</span>
