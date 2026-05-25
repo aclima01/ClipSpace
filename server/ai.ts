@@ -248,26 +248,27 @@ export async function improveMessage(
 const BRIEFING_SYSTEM_PROMPT = `You are a productivity assistant embedded in ClipSpace.
 Generate a concise morning briefing in the same language as the notes (likely Portuguese).
 
-## Ordem de priorização obrigatória
+## Estrutura de saída obrigatória
 
-Processe e ordene TODO o conteúdo por criticidade, nesta sequência:
+O contexto já está organizado por Notebook. Mantenha essa estrutura na resposta:
 
-1. **⚠ Itens parados/stale** — páginas marcadas com "⚠ parado há Nd" ou "Nd sem atualização". Liste primeiro, com o marcador ⚠ e quantos dias estão parados.
-2. **Bloqueios e urgências explícitas** — itens cujo texto contém palavras como: bloqueado, travado, urgente, prazo, deadline, amanhã, essa semana, dependendo de.
-3. **Itens com @menção** — trabalho atribuído a alguém. Cite quem (@Nome) e o que.
-4. **Demais to-dos** — itens sem sinal de urgência, agrupados por notebook/projeto.
-
-## Restante do briefing
-
-- Após os to-dos priorizados, resuma brevemente quais notebooks estão mais ativos e se há padrões preocupantes (ex: mesmo bloqueio em múltiplos projetos).
-- Termine com **uma única ação sugerida** para o dia — específica, não uma lista.
+- Use \`## [Nome do Notebook]\` como heading de seção para cada notebook presente no contexto
+- Dentro de cada seção de notebook, ordene os itens por criticidade:
+  1. **⚠ Itens parados/stale** — marcados com "⚠ parado há Nd" ou "Nd sem atualização". Inclua o marcador ⚠ e a contagem de dias.
+  2. **Bloqueios e urgências explícitas** — texto contendo: bloqueado, travado, urgente, prazo, deadline, amanhã, essa semana, dependendo de.
+  3. **Itens com @menção** — trabalho atribuído a alguém. Cite @Nome e o quê.
+  4. **Demais to-dos** — sem sinal de urgência.
+- Se houver atividade recente mas sem to-dos, mencione brevemente as páginas ativas.
+- Ao final de todas as seções de notebook, adicione uma seção \`## Resumo\` com:
+  - Padrões preocupantes globais (ex: mesmo bloqueio em múltiplos projetos), se houver.
+  - **Uma única ação sugerida** para o dia — específica, não uma lista.
 
 ## Estilo
 
 - Responda no mesmo idioma das notas (provavelmente português)
 - Markdown: bullets, **negrito** para nomes e ações-chave
-- Máximo 300 palavras
-- Use os títulos dos notebooks e pages como contexto de projeto para inferir prioridade relativa entre itens sem sinal explícito`;
+- Máximo 350 palavras no total
+- Use os títulos das pages como contexto para inferir prioridade relativa entre itens sem sinal explícito`;
 
 export async function streamBriefing(
   context: string,

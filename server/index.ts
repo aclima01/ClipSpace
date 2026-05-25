@@ -317,24 +317,42 @@ app.post("/api/ai/briefing", async (req, res) => {
     return Math.floor((nowMs - new Date(iso).getTime()) / (1000 * 60 * 60 * 24));
   }
 
-  const lines: string[] = [];
-  if (data.openTodos.length > 0) {
-    lines.push("## To-dos abertos\n");
-    for (const g of data.openTodos) {
-      const days = staleDays(g.pageUpdatedAt);
-      const staleTag = days >= 7 ? ` ⚠ parado há ${days} dias` : days >= 2 ? ` (${days}d sem atualização)` : "";
-      lines.push(`**${g.notebookTitle} / ${g.pageTitle}**${staleTag}`);
-      g.items.forEach((i) => lines.push(`- [ ] ${i}`));
-      lines.push("");
-    }
-  } else {
-    lines.push("Nenhum to-do aberto.\n");
+  // Group todos and recent pages by notebook
+  const byNotebook = new Map<string, {
+    todos: typeof data.openTodos;
+    pages: typeof data.recentPages;
+  }>();
+  for (const g of data.openTodos) {
+    if (!byNotebook.has(g.notebookTitle)) byNotebook.set(g.notebookTitle, { todos: [], pages: [] });
+    byNotebook.get(g.notebookTitle)!.todos.push(g);
   }
-  if (data.recentPages.length > 0) {
-    lines.push("## Atividade recente\n");
-    data.recentPages.forEach((p) =>
-      lines.push(`- **${p.notebookTitle} / ${p.pageTitle}** — ${p.newMessages} nota(s) nova(s)`)
-    );
+  for (const p of data.recentPages) {
+    if (!byNotebook.has(p.notebookTitle)) byNotebook.set(p.notebookTitle, { todos: [], pages: [] });
+    byNotebook.get(p.notebookTitle)!.pages.push(p);
+  }
+
+  const lines: string[] = [];
+  if (byNotebook.size === 0) {
+    lines.push("Nenhuma atividade recente e nenhum to-do aberto.");
+  } else {
+    for (const [notebookTitle, { todos, pages }] of byNotebook) {
+      lines.push(`## Notebook: ${notebookTitle}\n`);
+      if (todos.length > 0) {
+        lines.push("### To-dos abertos\n");
+        for (const g of todos) {
+          const days = staleDays(g.pageUpdatedAt);
+          const staleTag = days >= 7 ? ` ⚠ parado há ${days} dias` : days >= 2 ? ` (${days}d sem atualização)` : "";
+          lines.push(`**${g.pageTitle}**${staleTag}`);
+          g.items.forEach((i) => lines.push(`- [ ] ${i}`));
+          lines.push("");
+        }
+      }
+      if (pages.length > 0) {
+        lines.push("### Atividade recente\n");
+        pages.forEach((p) => lines.push(`- **${p.pageTitle}** — ${p.newMessages} nota(s) nova(s)`));
+        lines.push("");
+      }
+    }
   }
 
   res.setHeader("Content-Type", "text/event-stream");
