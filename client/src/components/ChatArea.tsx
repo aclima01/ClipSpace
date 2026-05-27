@@ -5,11 +5,36 @@ import { Textarea } from "./ui/textarea";
 import { ScrollArea } from "./ui/scroll-area";
 import { MessageBubble } from "./MessageBubble";
 import { AiPanel } from "./AiPanel";
+import { MentionPopover } from "./MentionPopover";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { randomUUID, cn } from "@/lib/utils";
 import { saveCache, loadCache, enqueueMessage } from "@/lib/offlineCache";
 import { TEMPLATES } from "@/lib/templates";
 import type { Page, LocalMessage } from "../types";
+
+const MENTION_AT_CURSOR_RE = /@([\wÀ-ž]*)$/;
+const MENTION_SEED_RE = /@([\wÀ-ž]+)/g;
+const PEOPLE_KEY = "clipspace:knownPeople";
+
+function getMentionAtCursor(text: string, cursorPos: number): { query: string; start: number } | null {
+  const before = text.slice(0, cursorPos);
+  const match = MENTION_AT_CURSOR_RE.exec(before);
+  if (!match) return null;
+  return { query: match[1], start: before.length - match[0].length };
+}
+
+function loadPeople(): string[] {
+  try {
+    const raw = localStorage.getItem(PEOPLE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePeople(people: string[]) {
+  localStorage.setItem(PEOPLE_KEY, JSON.stringify(people));
+}
 
 const CONFIRM_TIMEOUT_MS = 5000;
 
@@ -91,6 +116,9 @@ export function ChatArea({
   const [text, setText] = useState("");
   const [aiOpen, setAiOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
+  const [mentionState, setMentionState] = useState<{ query: string; start: number } | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [knownPeople, setKnownPeople] = useState<string[]>(loadPeople);
   const [pinnedExpanded, setPinnedExpanded] = useState(true);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState("");
@@ -153,6 +181,20 @@ export function ChatArea({
         const confirmed = msgs.map((m) => ({ ...m, status: "confirmed" as const }));
         setMessages(confirmed);
         await saveCache(`messages:${page.id}`, msgs);
+        // Seed known people from @mentions in loaded messages
+        const found = new Set<string>();
+        for (const msg of msgs) {
+          MENTION_SEED_RE.lastIndex = 0;
+          let m: RegExpExecArray | null;
+          while ((m = MENTION_SEED_RE.exec(msg.content)) !== null) found.add(m[1]);
+        }
+        if (found.size > 0) {
+          setKnownPeople(prev => {
+            const merged = [...new Set([...prev, ...found])].sort();
+            if (merged.length !== prev.length) { savePeople(merged); return merged; }
+            return prev;
+          });
+        }
       })
       .catch(async () => {
         const cached = await loadCache<LocalMessage[]>(`messages:${page.id}`);
@@ -319,7 +361,77 @@ export function ChatArea({
     }, CONFIRM_TIMEOUT_MS);
   };
 
+  const filteredPeople = mentionState
+    ? knownPeople.filter((p) => p.toLowerCase().startsWith(mentionState.query.toLowerCase()))
+    : [];
+
+  const insertMention = (name: string) => {
+    if (!mentionState) return;
+    const before = text.slice(0, mentionState.start);
+    const after = text.slice(mentionState.start + 1 + mentionState.query.length);
+    const newText = `${before}@${name}${after.startsWith(" ") ? "" : " "}${after}`;
+    setText(newText);
+    setMentionState(null);
+    setMentionIndex(0);
+    if (!knownPeople.includes(name)) {
+      setKnownPeople((prev) => {
+        const updated = [...new Set([...prev, name])].sort();
+        savePeople(updated);
+        return updated;
+      });
+    }
+    requestAnimationFrame(() => {
+      if (!textareaRef.current) return;
+      const spacer = after.startsWith(" ") ? 0 : 1;
+      const pos = before.length + 1 + name.length + spacer;
+      textareaRef.current.setSelectionRange(pos, pos);
+      textareaRef.current.focus();
+    });
+  };
+
+  const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setText(val);
+    const cursor = e.target.selectionStart ?? val.length;
+    const mention = getMentionAtCursor(val, cursor);
+    setMentionState(mention);
+    if (mention) setMentionIndex(0);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionState) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setMentionIndex((i) => Math.min(i + 1, filteredPeople.length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionIndex((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === "Enter") {
+        const selected = filteredPeople[mentionIndex];
+        if (selected) {
+          e.preventDefault();
+          insertMention(selected);
+        }
+        return;
+      }
+      if (e.key === " " && mentionState.query) {
+        e.preventDefault();
+        const exactMatch = knownPeople.find(
+          (p) => p.toLowerCase() === mentionState.query.toLowerCase()
+        );
+        insertMention(exactMatch ?? mentionState.query);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionState(null);
+        return;
+      }
+    }
     if (e.key === "Enter" && e.ctrlKey) {
       e.preventDefault();
       handleSend();
@@ -537,14 +649,26 @@ export function ChatArea({
               }}
             >
               <div className="flex gap-2 flex-1 min-h-0">
-                <Textarea
-                  ref={textareaRef}
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder="colar ou escrever aqui…"
-                  className="flex-1 h-full resize-none"
-                />
+                <div className="relative flex-1 min-h-0">
+                  {mentionState && (
+                    <MentionPopover
+                      query={mentionState.query}
+                      people={filteredPeople}
+                      activeIndex={mentionIndex}
+                      onSelect={insertMention}
+                      onHover={setMentionIndex}
+                    />
+                  )}
+                  <Textarea
+                    ref={textareaRef}
+                    value={text}
+                    onChange={handleTextChange}
+                    onKeyDown={handleKeyDown}
+                    onBlur={() => setTimeout(() => setMentionState(null), 200)}
+                    placeholder="colar ou escrever aqui…"
+                    className="h-full w-full resize-none"
+                  />
+                </div>
                 <div className="flex flex-col gap-1 self-end shrink-0">
                   <button
                     onClick={() => setTemplateOpen((v) => !v)}
